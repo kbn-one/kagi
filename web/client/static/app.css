@@ -1,0 +1,166 @@
+/*
+ * The site's design tokens and document-level defaults.
+ *
+ * Everything else on this site is a `css(...)` mixin from `@remix-run/component`, rendered into each
+ * page's <head>. Two things cannot be, and they are both here.
+ *
+ * The cascade order, first. Generated `css(...)` rules — this site's mixins and the styling
+ * first-party remix/ui components carry — all land in the native `rmx` layer, and a mixin cannot
+ * choose its layer. So:
+ *
+ *   base  this file. Tokens, the box model, and the defaults for elements nobody styles by hand.
+ *         Being before `rmx`, every one is a default a component may override without a fight,
+ *         which is why nothing below needs :where() or !important.
+ *   rmx   Remix's. Every mixin on this site, and what remix/ui components bring with them.
+ *   app   empty, and named anyway: where a rule goes that has to beat a component's own styling
+ *         on purpose. Unlayered CSS would also win, but it would win by accident.
+ *
+ * Layers rank by where they are first named, and this file is linked at the top of <head> while
+ * Remix appends its styles just before </head> — so naming all three here settles the order.
+ *
+ * The token values, second. Remix supplies behaviour and a little component styling, not a theme,
+ * so the palette, typography and radii are the app's. They live here as custom properties because
+ * light and dark swap between two sets of them; `client/tokens.ts` is the TypeScript side, and holds
+ * the names rather than a second copy of the values.
+ *
+ * The font stack and `palt` below are what makes 日本語 set properly, and they go together: the
+ * stack is ordered so kana never gets drawn by a Latin font, and `palt` is what stops a line of
+ * 日本語 setting with a hole after every 、. They are here rather than behind a language check
+ * because they cost nothing for Latin text — a font that has no kana is never asked to draw any.
+ * The document's own language is `layout.tsx`'s `<html lang>`, and it says `en` because every word
+ * this template ships is English; a site writing in Japanese changes that one attribute.
+ */
+
+@layer base, rmx, app;
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+
+    /*
+     * A Japanese stack. The first two names cover Latin text, the next three cover 日本語, and the
+     * order is what decides which script each font draws: a browser walks the list per character,
+     * so Helvetica Neue and Arial — neither of which has kana — hand the Japanese on to Hiragino
+     * or Noto without ever being asked to fake it.
+     */
+    --font-sans:
+      "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans",
+      "Noto Sans JP", sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    --radius-sm: 0.3rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 0.75rem;
+
+    /* The measure every band of the shell lines up to. */
+    --content-width: 44rem;
+
+    --bg: #ffffff;
+    --fg: #1f2937;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    /* Text on an --accent background — dark in dark mode, where the accent is light. */
+    --on-accent: #ffffff;
+    --border: #e5e7eb;
+    /* A raised-but-quiet surface: cards, code, callouts. */
+    --card: #f9fafb;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0f19;
+      --fg: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #60a5fa;
+      --on-accent: #0b0f19;
+      --border: #1f2937;
+      --card: #111827;
+    }
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    /*
+     * `clip`, not `hidden`: it stops a full-bleed child from dragging a horizontal scrollbar
+     * behind the vertical one — `50vw` counts the scrollbar's width, the viewport does not —
+     * without making this a scroll container, so `position: sticky` inside still works and
+     * vertical scrolling is untouched.
+     */
+    overflow-x: clip;
+    font-family: var(--font-sans);
+    /*
+     * `palt` — proportional alternate widths. Japanese fonts ship every glyph on the same square
+     * em, which leaves a visible hole after 、and around （）; this swaps in the proportional forms
+     * so a line of 日本語 sets evenly. It inherits, which is what the `code` rule below undoes.
+     */
+    font-feature-settings: "palt";
+    line-height: 1.6;
+    color: var(--fg);
+    background: var(--bg);
+  }
+
+  a {
+    color: var(--accent);
+  }
+
+  h1 {
+    font-size: 2rem;
+    line-height: 1.2;
+    margin-top: 0;
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--card);
+    padding: 0.1rem 0.35rem;
+    border-radius: var(--radius-sm);
+  }
+
+  /*
+   * `palt` is inherited, and a proportional width is the one thing a monospaced font is not for —
+   * it would pull a code block's columns out of line. `normal` stops it at the boundary. `pre` is
+   * named as well as `code` because a read-out is sometimes a bare `<pre>`.
+   */
+  code,
+  kbd,
+  samp,
+  pre {
+    font-feature-settings: normal;
+  }
+}
+
+/*
+ * The share buttons — `<share-buttons>`, from @kuboon/share-element, on the line under each
+ * article. See `client/islands/share.tsx` for the other half.
+ *
+ * It renders in light DOM with `:where(...)` defaults exactly so a page can restyle it, and this
+ * is a page doing that: the package's own borders and backgrounds are fixed light-mode greys, so
+ * without these three rules the buttons would stay white-on-white in dark mode. Nothing here
+ * touches layout or which buttons are shown — the row is a flex line and the collapse to the
+ * native share sheet on a touch device are both the package's, and both are what this site wants.
+ *
+ * Unlayered, and that is the part not to "tidy up" into `@layer app`. The package appends its
+ * defaults as a plain `<style>` with no layer of its own, and unlayered CSS outranks every layer
+ * whatever the specificity — so a rule in `app` loses to `:where(.share-buttons__button)` even
+ * though `:where()` counts for nothing. Verified both ways in Chromium.
+ */
+
+.share-buttons__button {
+  border-color: var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.share-buttons__button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg);
+}

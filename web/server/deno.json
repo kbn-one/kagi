@@ -1,0 +1,77 @@
+{
+  "tasks": {
+    "dev": "deno serve -P=dev --watch --port 8000 router.tsx",
+    "serve": "deno serve -P=dev router.tsx",
+    "build": "deno run -c deno.json -P=build jsr:@remix-kbn/ssg/build.ts --out ../dist",
+    "build:worker": "deno bundle --platform=browser --external=cloudflare:workers -o ../worker-dist/worker.js worker.ts",
+    "build:cf": {
+      "description": "Static site + Worker bundle, arranged as the Build Output for `cf deploy --prebuilt`",
+      "dependencies": ["build", "build:worker"],
+      "command": "deno run -A cf_build.ts"
+    },
+    "check": "deno check ."
+  },
+  "permissions": {
+    "build": {
+      "read": [
+        "../.."
+      ],
+      "write": [
+        "../dist"
+      ],
+      "env": {
+        "allow": [
+          "BASE_URL"
+        ],
+        "ignore": [
+          "NODE_ENV",
+          "VSCODE_TEXTMATE_DEBUG",
+          "IDP_ORIGIN",
+          "RP_ORIGIN",
+          "RP_SIGNING_KEY_JWK",
+          "TURSO_DATABASE_URL",
+          "TURSO_AUTH_TOKEN"
+        ]
+      },
+      "import": true
+    },
+    "dev": {
+      "read": [
+        "../.."
+      ],
+      "env": {
+        "allow": [
+          "PORT",
+          "IDP_ORIGIN",
+          "RP_ORIGIN",
+          "RP_SIGNING_KEY_JWK",
+          "TURSO_DATABASE_URL",
+          "TURSO_AUTH_TOKEN"
+        ],
+        "ignore": [
+          "BASE_URL",
+          "NODE_ENV",
+          "VSCODE_TEXTMATE_DEBUG"
+        ]
+      },
+      "net": [
+        "0.0.0.0",
+        "127.0.0.1",
+        "localhost",
+        "id.kbn.one"
+      ],
+      "import": true
+    }
+  },
+  "compilerOptions": {
+    "lib": [
+      "deno.ns",
+      "deno.unstable",
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "jsx": "react-jsx",
+    "jsxImportSource": "@remix-run/component"
+  }
+}

@@ -1,0 +1,9 @@
+# Keeps the actions in .github/workflows up to date. For a workflow that is onboarded to
+# .github/workflows/actions.lock, Dependabot regenerates the matching lockfile entry in the same
+# pull request.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,0 +1,12 @@
+# mise config used by the GitHub Pages deploy workflow.
+# The reusable workflow installs mise, then runs `mise run build` (its default
+# build-command), which installs Deno and builds the static site.
+[tools]
+deno = "2"
+
+[tasks.build]
+description = "Build the static site into web/dist"
+run = "deno task build"
+
+[tasks.install-apm]
+run = "curl -sSL https://aka.ms/apm-unix"

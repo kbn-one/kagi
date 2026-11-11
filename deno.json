@@ -1,0 +1,102 @@
+{
+  "workspace": [
+    "./packages/session-storage-kv",
+    "./packages/remix-dpop-session-middleware",
+    "./web/client",
+    "./web/server",
+    "./web/tests"
+  ],
+  "tasks": {
+    "dev": "deno task --cwd web/server dev",
+    "serve": "deno task --cwd web/server serve",
+    "build": "deno task --cwd web/server build",
+    "build:cf": "deno task --cwd web/server build:cf",
+    "cf": "deno run -A npm:cf",
+    "test": "deno test -P --ignore=web/tests",
+    "test:browser": "deno task --cwd web/tests test",
+    "lightpanda:install": {
+      "description": "Download the lightpanda binary used by test:browser (a pinned release, not nightly)",
+      "command": "deno run -A npm:@lightpanda/browser install 1.0.3"
+    },
+    "check": "deno task --cwd web/client check && deno task --cwd web/server check && deno check packages && deno lint && deno fmt --check"
+  },
+  "permissions": {
+    "default": {
+      "read": true,
+      "env": true,
+      "net": [
+        "id.kbn.one",
+        "localhost",
+        "127.0.0.1"
+      ],
+      "import": true
+    }
+  },
+  "test": {
+    "permissions": "default"
+  },
+  "nodeModulesDir": "auto",
+  "minimumDependencyAge": {
+    "age": "P1D",
+    "exclude": [
+      "jsr:@kuboon/*",
+      "jsr:@remix-kbn/*",
+      "npm:@remix-run/*"
+    ]
+  },
+  "unstable": [
+    "bundle",
+    "kv"
+  ],
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@remix-run/component"
+  },
+  "imports": {
+    "@cloudflare/build-output-utils": "npm:@cloudflare/build-output-utils@0.9.1",
+    "@cloudflare/config": "npm:@cloudflare/config@0.25.0",
+    "@kuboon/dpop": "jsr:@kuboon/dpop@^0.1.2",
+    "@kuboon/kv": "jsr:@kuboon/kv@^0.2.0",
+    "@kuboon/md": "jsr:@kuboon/md@^0.7.0",
+    "@remix-kbn/data-table-sqlite-turso": "jsr:@remix-kbn/data-table-sqlite-turso@^0.6.0",
+    "@kuboon/share-element": "jsr:@kuboon/share-element@^0.5.0",
+    "@libsql/client": "npm:@libsql/client@^0.17.4",
+    "@lightpanda/browser": "npm:@lightpanda/browser@^1.6.0",
+    "@remix-kbn/assets-deno": "jsr:@remix-kbn/assets-deno@^0.9.0",
+    "@remix-kbn/helper-agent/agent/dummy": "jsr:@remix-kbn/helper-agent@^0.4.0/agent/dummy",
+    "@remix-kbn/helper-agent/client": "jsr:@remix-kbn/helper-agent@^0.4.0/client",
+    "@remix-kbn/helper-agent/controller": "jsr:@remix-kbn/helper-agent@^0.4.0/controller",
+    "@remix-kbn/ssg": "jsr:@remix-kbn/ssg@^0.13.0",
+    "@remix-run/component": "npm:@remix-run/component@^1.2.0",
+    "@remix-run/cop-middleware": "npm:@remix-run/cop-middleware@^1.0.0",
+    "@remix-run/csp-middleware": "npm:@remix-run/csp-middleware@^1.0.0",
+    "@remix-run/data-table": "npm:@remix-run/data-table@^1.0.0",
+    "@remix-run/fetch-router": "npm:@remix-run/fetch-router@^1.0.0",
+    "@remix-run/render-middleware": "npm:@remix-run/render-middleware@^1.1.0",
+    "@remix-run/session": "npm:@remix-run/session@^1.0.1",
+    "@remix-run/spa": "npm:@remix-run/spa@^1.0.2",
+    "@remix-run/ui": "npm:@remix-run/ui@^0.13.1",
+    "@std/assert": "jsr:@std/assert@^1.0.19",
+    "@std/front-matter": "jsr:@std/front-matter@^1.0.9",
+    "canvaskit-wasm": "npm:canvaskit-wasm@^0.40.0",
+    "cf": "npm:cf@1.0.0-beta.16",
+    "jose": "jsr:@panva/jose@^6.2.3",
+    "puppeteer-core": "npm:puppeteer-core@^23.11.1"
+  },
+  "fmt": {
+    "exclude": [
+      "web/dist",
+      "web/worker-dist",
+      ".cloudflare",
+      "node_modules"
+    ]
+  },
+  "lint": {
+    "exclude": [
+      "web/dist",
+      "web/worker-dist",
+      ".cloudflare",
+      "node_modules"
+    ]
+  }
+}

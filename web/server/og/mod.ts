@@ -30,7 +30,7 @@ import { base } from "../../client/base.ts";
 import { type Card, renderCard } from "./card.ts";
 
 /** The eyebrow every card carries unless a page asks for its own. */
-const SITE_NAME = "Remix3 on Deno Template";
+const SITE_NAME = "kagi";
 
 /** What a page tells its card — the two things every page module already exports. */
 export interface OgPage {

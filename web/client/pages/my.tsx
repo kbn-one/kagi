@@ -5,7 +5,7 @@ import { DemoCard } from "../islands/demo_card.tsx";
 import { PushCard } from "../islands/push_card.tsx";
 import { SignOutButton } from "../islands/signout_button.tsx";
 
-export const title = "マイページ — Remix3 on Deno Template";
+export const title = "マイページ — kagi";
 export const description =
   "外部 IdP (id.kbn.one) を使ったサインインとプッシュ通知のサンプル。";
 

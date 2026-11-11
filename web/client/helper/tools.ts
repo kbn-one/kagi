@@ -14,7 +14,7 @@
 import type { ClientTool } from "@remix-kbn/helper-agent/client";
 
 /** Where a bug report goes. The template's own repository — change it when you fork. */
-const ISSUES_URL = "https://github.com/kuboon/deno-remix-tmpl/issues/new";
+const ISSUES_URL = "https://github.com/kuboon/kagi/issues/new";
 
 /**
  * What page this is, read off the document rather than off a route table.

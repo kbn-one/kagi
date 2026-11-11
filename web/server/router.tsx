@@ -46,6 +46,10 @@ import * as Spa from "../client/pages/spa.tsx"; // [feature:spa]
 import { versions } from "./versions.ts"; // [feature:showcase]
 import * as Hydration from "../client/pages/hydration.tsx";
 import * as My from "../client/pages/my.tsx";
+import * as Kagi from "../client/pages/kagi.tsx"; // [feature:kagi]
+import { subController } from "./controllers/api/sub.ts"; // [feature:kagi]
+import { kagiHub } from "./lib/kagi/hub.ts"; // [feature:kagi]
+import { parseSubPath } from "./lib/kagi/room.ts"; // [feature:kagi]
 
 // [feature:protected-api] / [feature:server-send] / [feature:turso]: the server API.
 import { apiController } from "./controllers/api/controller.ts";
@@ -151,6 +155,7 @@ const top = createController(routes, {
       ),
     hydration: pageAction(routes.hydration, Hydration),
     my: pageAction(routes.my, My),
+    kagi: pageAction(routes.kagi, Kagi), // [feature:kagi]
     jwks: jwksAction, // [feature:server-send]
   },
 });
@@ -228,6 +233,7 @@ router.map(routes.spa, spa);
 // [feature:blog] Both blog routes at once: the listing, and one article.
 router.map(routes.blog, blogController);
 router.map(routes.api, api);
+router.map(routes.api.sub, subController); // [feature:kagi]
 router.map(routes.api.protected, apiController); // [feature:protected-api]
 
 router.get(`${base}/static/*path`, ({ request }) => staticFiles.fetch(request));
@@ -262,4 +268,22 @@ export const entryPoints: readonly string[] = [
   `/${stripBase(clientRuntime.helper, base)}`,
 ];
 
-export default router;
+/**
+ * What `deno serve` (and the static build) calls.
+ *
+ * [feature:kagi] The approver's WebSocket skips the router: `Deno.upgradeWebSocket` binds the
+ * upgrade to the very `Request` Deno served and needs its own `Response` back, and the router hands
+ * neither through unchanged ("Upgrade response was not returned from callback"). The Worker has no
+ * such limit (`WebSocketPair`), so there the route goes through the router like the others.
+ */
+export default {
+  fetch(request: Request): Promise<Response> {
+    const target = request.headers.get("upgrade")
+      ? parseSubPath(new URL(request.url).pathname, request.method)
+      : null;
+    if (target?.action === "ws") {
+      return kagiHub().dispatch(target.subId, "ws", request);
+    }
+    return router.fetch(request);
+  },
+};

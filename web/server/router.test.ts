@@ -7,8 +7,8 @@ Deno.test("GET / returns the shell with nav links and the runtime script", async
   assertStringIncludes(res.headers.get("content-type") ?? "", "text/html");
   const html = await res.text();
   assertStringIncludes(html, "<!DOCTYPE html>");
-  assertStringIncludes(html, "Remix3 on Deno Template");
-  assertStringIncludes(html, "kuboon.github.io/deno-remix-tmpl");
+  assertStringIncludes(html, "<h1>kagi</h1>");
+  assertStringIncludes(html, 'href="/kagi"');
   assertStringIncludes(html, 'href="/hydration"');
   assertStringIncludes(html, '<script type="module" src="/assets/hydration');
   // Soft navigation is the runtime's default now; no frame target attributes.
@@ -150,4 +150,23 @@ Deno.test("non-HTML responses carry no CSP", async () => {
   const res = await router.fetch(new Request("http://x/sw.js"));
   assertEquals(res.headers.get("content-security-policy"), null);
   await res.body?.cancel();
+});
+
+Deno.test("GET /kagi renders the approver island", async () => {
+  const res = await router.fetch(new Request("http://x/kagi"));
+  assertEquals(res.status, 200);
+  const html = await res.text();
+  assertStringIncludes(html, "/assets/islands/kagi_app");
+  assertStringIncludes(html, "<h2>秘密</h2>");
+});
+
+Deno.test("/api/sub answers problems for unknown subscriptions", async () => {
+  const res = await router.fetch(
+    new Request("http://x/api/sub/abcdefghijklmnopqrstuv/res?transaction_id=x"),
+  );
+  assertEquals(res.status, 404);
+  assertEquals(res.headers.get("content-type"), "application/problem+json");
+  // Ids that are not ours never reach a room.
+  const bad = await router.fetch(new Request("http://x/api/sub/short/res"));
+  assertEquals(bad.status, 404);
 });

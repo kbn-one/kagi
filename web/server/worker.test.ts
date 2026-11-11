@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import worker from "./worker.ts";
+import { setKagiHub } from "./lib/kagi/hub.ts";
 
 const get = (path: string) => worker.fetch(new Request(`http://x${path}`));
 
@@ -59,4 +60,57 @@ Deno.test("worker lets a same-origin POST through to the action", async () => {
   // The empty body is the action's own 400, not cop's 403.
   const body = await assertProblem(res, 400);
   assertEquals(typeof body.detail, "string");
+});
+
+Deno.test("worker answers /api/sub from memory without the Durable Object binding", async () => {
+  const id = "abcdefghijklmnopqrstuv";
+  const keys = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const publicKey = await crypto.subtle.exportKey("jwk", keys.publicKey);
+  const reg = await worker.fetch(
+    new Request(`http://x/api/sub/${id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "u1", publicKey }),
+    }),
+  );
+  assertEquals(reg.status, 201);
+  const req = await worker.fetch(
+    new Request(`http://x/api/sub/${id}/req`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ secrets: [], url: "https://example.com/" }),
+    }),
+  );
+  assertEquals(req.status, 202);
+  const { transaction_id } = await req.json();
+  const res = await get(
+    `/api/sub/${id}/res?transaction_id=${transaction_id}&wait=0`,
+  );
+  assertEquals(res.status, 202);
+  await res.body?.cancel();
+});
+
+Deno.test("worker forwards /api/sub to the KagiRoom Durable Object when bound", async () => {
+  const seen: string[] = [];
+  const namespace = {
+    idFromName: (name: string) => name,
+    get: (id: unknown) => ({
+      fetch: (r: Request) => {
+        seen.push(`${id} ${new URL(r.url).pathname}`);
+        return Promise.resolve(new Response("from DO"));
+      },
+    }),
+  };
+  const id = "zyxwvutsrqponmlkjihgfe";
+  const res = await worker.fetch(
+    new Request(`http://x/api/sub/${id}/res?transaction_id=t`),
+    { KAGI_ROOM: namespace },
+  );
+  assertEquals(await res.text(), "from DO");
+  assertEquals(seen, [`${id} /api/sub/${id}/res`]);
+  setKagiHub(undefined);
 });

@@ -1,6 +1,6 @@
-name: deno-remix-reference
+name: kagi
 version: 1.0.0
-description: APM project for deno-remix-reference
+description: APM project for kagi
 author: Ohkubo KOHEI
 dependencies:
   apm:

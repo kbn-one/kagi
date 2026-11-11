@@ -22,7 +22,7 @@ export interface ArticleSummary {
   summary: string;
 }
 
-export const title = "Blog — Remix3 on Deno Template";
+export const title = "Blog — kagi";
 export const description =
   "Articles authored in Markdown, rendered to static HTML.";
 

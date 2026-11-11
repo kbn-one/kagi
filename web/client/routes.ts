@@ -18,12 +18,14 @@
  *   shapes are stated here — a static deploy simply has no server to answer them.
  */
 
-import { get, post, route } from "@remix-run/fetch-router/routes";
+import { get, post, put, route } from "@remix-run/fetch-router/routes";
 
 import { base } from "./base.ts";
 
 export const routes = route(base, {
   home: get("/"),
+  // [feature:kagi] The approver's screen: secrets, subscription, and the requests to approve.
+  kagi: get("/kagi"),
   // [feature:hydration-demo]
   hydration: get("/hydration"),
   // [feature:signin] (the push card on this page is [feature:push])
@@ -46,6 +48,17 @@ export const routes = route(base, {
   // [feature:server-send] RP public JWKS — lets the IdP verify our `private_key_jwt` assertions.
   jwks: get("/.well-known/jwks.json"),
   api: route("api", {
+    // [feature:kagi] One approver subscription. `server/lib/kagi/` answers all four.
+    sub: route("sub", {
+      /** The approver registers its id.kbn.one user and device key under a fresh random id. */
+      register: put("/:id"),
+      /** A requester submits a request; answers `202 { transaction_id }`. */
+      req: post("/:id/req"),
+      /** A requester waits for the result (`?transaction_id=…&wait=seconds`). */
+      res: get("/:id/res"),
+      /** The approver's WebSocket. */
+      ws: get("/:id/ws"),
+    }),
     // [feature:server-send] Server-initiated push fan-out (delegates to the IdP). Not DPoP-protected.
     notify: post("/notify"),
     // [feature:turso] Turso (libSQL) + @remix-run/data-table sample.

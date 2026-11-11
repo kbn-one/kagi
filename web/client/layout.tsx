@@ -287,10 +287,12 @@ export function Shell(handle: Handle<ShellProps>) {
             href={routes.home.href()}
             data-rmx-document={document}
           >
-            Remix3 on Deno Template
+            kagi
           </a>
           <nav mix={navStyle}>
             <a href={routes.home.href()} data-rmx-document={document}>Home</a>
+            {/* [feature:kagi] */}
+            <a href={routes.kagi.href()} data-rmx-document={document}>承認</a>
             <a href={routes.hydration.href()} data-rmx-document={document}>
               Hydration
             </a>

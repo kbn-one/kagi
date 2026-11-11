@@ -1,7 +1,38 @@
-# deno-remix-tmpl
+# kagi (kagi.kbn.one)
 
-Remix v3 + Deno のテンプレート。DPoP (RFC 9449) セッションマネージャーと
-id.kbn.one 連携の push 通知を含む。
+秘密トークンを承認者のスマホのブラウザー内に持ち、API コールを検閲するアプリ。
+`kuboon/deno-remix-tmpl`（Remix v3 + Deno）から作った派生アプリで、**server
+モード**（Cloudflare Workers + Durable Objects）を選んだ。GitHub Pages
+への静的デプロイは消した（API が要るので静的版では動かない）。
+
+## kagi の構成
+
+- 三者: リクエスト元（秘密を知らない）・サーバー（秘密を見ない）・承認者の
+  スマホ（秘密を持ち、承認して自分で API を呼ぶ）。プロトコルの型は
+  `web/client/lib/kagi/protocol.ts` に一つだけ置き、サーバーとブラウザーで共有。
+- サーバー: `web/server/lib/kagi/room.ts` の `Room` が subscription
+  一つ分（登録・トランザクション・承認者の WebSocket・`GET /res`
+  の待ち手）。`hub.ts` がローカルではメモリ、Cloudflare では Durable Object
+  (`durable_object.ts` の `KagiRoom`、`cloudflare.config.ts` で宣言) に置く。
+  WebSocket と long-poll を同じインスタンスで会わせるため DO が必須。
+- Deno では `Deno.upgradeWebSocket` が fetch-router を通ると壊れる （router が
+  Request/Response を作り直す）ので、`router.tsx` の default export が
+  `/api/sub/:id/ws` だけ router の前で hub に渡す。Worker は `WebSocketPair`
+  なので router 経由で良い。
+- ブラウザー: `lib/kagi/vault.ts`（パスキー PRF → HKDF → AES-GCM で
+  localStorage）、`device.ts`（subscription と IndexedDB の非 extractable ECDSA
+  端末鍵）、`connection.ts`（WebSocket。結果はメモリにだけ保持）、
+  `substitute.ts`（`[NAME]` の置換、送信先ホスト制限、結果からの秘密の除去）、
+  画面は `islands/kagi_app.tsx`（`/kagi`）。
+- 通知は既存の id.kbn.one 連携（`server/lib/push/client.ts`）で承認者の userId
+  へ送る。`RP_ORIGIN`（`https://kagi.kbn.one`）を IdP の `AUTHORIZE_WHITELIST`
+  に入れ、Worker secret の `RP_SIGNING_KEY_JWK` を設定しておく。
+- 既知の制約: `:id` を知る人は誰でもリクエストを送れる（承認者が拒否できる
+  だけ）。`PUT /api/sub/:id` の userId は IdP で検証していない（他人の userId
+  を登録すると、その人に通知が届きうる）。呼び先 API は CORS
+  でこのオリジンを許可している必要がある。
+
+以下はテンプレから引き継いだ説明。
 
 ## このリポジトリは何か（最初に判定する）
 

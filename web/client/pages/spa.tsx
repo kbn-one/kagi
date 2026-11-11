@@ -45,7 +45,7 @@ export const SPA_IDS = ["1", "2", "3"] as const;
 /** One of {@link SPA_IDS}. */
 export type SpaId = typeof SPA_IDS[number];
 
-export const title = "Client-side routing — Remix3 on Deno Template";
+export const title = "Client-side routing — kagi";
 export const description =
   "A @remix-run/spa router running in the browser, over three URLs that are " +
   "still generated as static HTML: same routes.ts, same matcher, no request " +
@@ -71,7 +71,7 @@ export function parseSpaId(value: string | undefined): SpaId | null {
 
 /** The `<title>` for one view, so each of the three URLs is its own page. */
 export function titleFor(id: SpaId): string {
-  return `${views[id].heading} — SPA — Remix3 on Deno Template`;
+  return `${views[id].heading} — SPA — kagi`;
 }
 
 /** What the screen is handed. */

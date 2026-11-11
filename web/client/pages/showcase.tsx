@@ -29,7 +29,7 @@ import { TabsDemo } from "../islands/showcase/tabs.tsx";
 import { ToggleDemo } from "../islands/showcase/toggle.tsx";
 import { brandTint, fontSans, theme } from "../islands/showcase/_lib/tokens.ts";
 
-export const title = "UI showcase — Remix3 on Deno Template";
+export const title = "UI showcase — kagi";
 export const description =
   "Headless @remix-run/ui primitives with app-owned styling, and the animation " +
   "helpers, each one a hydrated island whose parameters you can change live.";

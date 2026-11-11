@@ -15,7 +15,7 @@ import type { Handle } from "@remix-run/component";
 
 import { FullscreenGame } from "../islands/fullscreen-game.tsx";
 
-export const title = "Fullscreen game — Remix3 on Deno Template";
+export const title = "Fullscreen game — kagi";
 export const description =
   "A game page that is the whole screen: no site chrome, safe-area insets, " +
   "and no zoom, scroll or text selection.";

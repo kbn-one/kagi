@@ -9,7 +9,7 @@
  * Served at `${base}/sw.js` by the `sw.js` route in server/router.tsx (verbatim).
  */
 
-const DEFAULT_TITLE = "Remix3 on Deno";
+const DEFAULT_TITLE = "kagi";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());

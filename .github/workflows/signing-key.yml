@@ -2,8 +2,9 @@
 # (web/server/set_signing_key.ts). The private key never reaches the log; the run prints only its
 # kid, which /.well-known/jwks.json shows once the Worker serves it.
 #
-# Run it once after the first deploy, from Actions → signing-key → Run workflow. Re-running refuses
-# to replace an existing key unless `rotate` is checked.
+# The deploy (cloudflare.yml) already sets the key after the first deploy, so this is for rotation:
+# Actions → signing-key → Run workflow with `rotate` checked. Without `rotate` it refuses to replace
+# an existing key.
 name: signing-key
 
 on:

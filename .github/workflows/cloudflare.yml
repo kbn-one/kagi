@@ -11,14 +11,27 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v7
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      # Whether the Worker has RP_SIGNING_KEY_JWK yet. cloudflare.config.ts declares the secret only
+      # when it does: the first deploy has no previous version to inherit it from.
+      - name: Check the signing key
+        timeout-minutes: 3
+        # Two lines so that a failed check fails the step instead of passing an empty value on.
+        run: |
+          has=$(deno task -q set-signing-key --check)
+          echo "KAGI_HAS_SIGNING_KEY=$has" >> "$GITHUB_ENV"
       # Static site + Worker bundle,
       # arranged as the Build Output Specification for `cf deploy --prebuilt`.
       - run: deno task build:cf
       - run: deno task cf deploy --prebuilt
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # First deploy: the Worker exists now, so give it its key.
+      - name: Set the signing key
+        if: env.KAGI_HAS_SIGNING_KEY == '0'
+        timeout-minutes: 3
+        run: deno task set-signing-key

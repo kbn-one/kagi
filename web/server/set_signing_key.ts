@@ -1,10 +1,13 @@
 /**
  * Generates the RP's ES256 signing key and stores it as the Worker secret `RP_SIGNING_KEY_JWK`.
  *
- * Run by `.github/workflows/signing-key.yml` (`deno task set-signing-key`). The private key goes
+ * The deploy workflow (`.github/workflows/cloudflare.yml`) runs it after the first deploy, and
+ * `.github/workflows/signing-key.yml` runs it by hand to rotate (`deno task set-signing-key`). The private key goes
  * straight from memory to the Cloudflare API: it is never printed, written to disk, or passed on a
  * command line. Only the public key's thumbprint (the JWKS `kid`) is logged, so the run can be
  * checked against `/.well-known/jwks.json` after the next deploy.
+ *
+ * With `--check` it only prints whether the Worker has the key (`1` / `0`).
  *
  * Refuses to replace an existing key unless `--rotate` is given: the IdP verifies our client
  * assertions against the JWKS, so a new key takes effect as soon as the Worker serves it, and an
@@ -19,6 +22,7 @@ import { calculateJwkThumbprint } from "jose";
 
 const SECRET = "RP_SIGNING_KEY_JWK";
 const rotate = Deno.args.includes("--rotate");
+const check = Deno.args.includes("--check");
 
 const token = Deno.env.get("CLOUDFLARE_API_TOKEN");
 if (!token) throw new Error("CLOUDFLARE_API_TOKEN is not set");
@@ -41,19 +45,27 @@ const api =
   }/secrets`;
 const headers = { authorization: `Bearer ${token}` };
 
-// Does the Worker already have a key?
+// Does the Worker already have a key? 404 also covers a Worker that was never deployed.
 const existing = await fetch(`${api}/${SECRET}`, { headers });
 await existing.body?.cancel();
+if (!existing.ok && existing.status !== 404) {
+  throw new Error(
+    `Could not read ${worker}'s secrets (HTTP ${existing.status}). Can the token edit Workers scripts?`,
+  );
+}
+
+// `--check`: print 1 or 0 and change nothing. The deploy workflow uses it to decide whether
+// `cloudflare.config.ts` may declare the secret (see `KAGI_HAS_SIGNING_KEY` there).
+if (check) {
+  console.log(existing.ok ? "1" : "0");
+  Deno.exit(0);
+}
+
 if (existing.ok && !rotate) {
   console.error(
     `${worker} already has ${SECRET}. Re-run with rotate to replace it.`,
   );
   Deno.exit(1);
-}
-if (!existing.ok && existing.status !== 404) {
-  throw new Error(
-    `Could not read ${worker}'s secrets (HTTP ${existing.status}). Has the Worker been deployed, and can the token edit Workers scripts?`,
-  );
 }
 
 const { privateKey, publicKey } = await crypto.subtle.generateKey(

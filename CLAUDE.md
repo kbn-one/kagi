@@ -80,7 +80,11 @@ env アクセスは `web/server/config.ts` に集約し、ホスト非依存に�
   クライアントアサーションの `clientId`/`iss`/`sub`。未設定だと通知送信が
   エラーになる（リクエスト自体は受け付け、`notified: false` を返す）。
 - `RP_SIGNING_KEY_JWK` — ES256 秘密鍵 (JWK JSON)。未設定ならプロセス毎に生成
-  （開発用）。本番は Worker secret に固定鍵を置く。
+  （開発用）。本番は Worker secret に固定鍵を置く。初回デプロイの後に Actions の
+  `signing-key`
+  ワークフロー（`web/server/set_signing_key.ts`）を手動実行すると、 鍵を生成して
+  Cloudflare API で直接 secret に入れる（鍵はログにもコマンド行にも 出ず、`kid`
+  だけを表示）。既に鍵があれば `rotate` を付けない限り置き換えない。
 
 ## API のエラー応答 (RFC 9457)
 

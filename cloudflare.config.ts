@@ -39,8 +39,8 @@ export default defineConfig({
       IDP_ORIGIN: bindings.text("https://id.kbn.one"),
       // Must be in the IdP's AUTHORIZE_WHITELIST for the approval push to be accepted.
       RP_ORIGIN: bindings.text("https://kagi.kbn.one"),
-      // Secret, set once with `deno task cf workers secrets update RP_SIGNING_KEY_JWK --worker kagi
-      // --type secret_text --text ...`; declared here so a deploy keeps it.
+      // Secret, generated and set by the `signing-key` workflow (`web/server/set_signing_key.ts`);
+      // declared here so a deploy keeps it.
       RP_SIGNING_KEY_JWK: bindings.secret(),
     },
   },

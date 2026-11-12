@@ -9,6 +9,10 @@
     "serve": "deno task --cwd web/server serve",
     "build": "deno task --cwd web/server build",
     "build:cf": "deno task --cwd web/server build:cf",
+    "set-signing-key": {
+      "description": "Generate the ES256 key and store it as the Worker secret RP_SIGNING_KEY_JWK (pass --rotate to replace one)",
+      "command": "deno task --cwd web/server set-signing-key"
+    },
     "cf": "deno run -A npm:cf",
     "test": "deno test -P --ignore=web/tests",
     "test:browser": "deno task --cwd web/tests test",

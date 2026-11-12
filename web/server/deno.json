@@ -12,6 +12,7 @@
       ],
       "command": "deno run -A cf_build.ts"
     },
+    "set-signing-key": "deno run --allow-net=api.cloudflare.com --allow-env --allow-read=../.. set_signing_key.ts",
     "check": "deno check ."
   },
   "permissions": {

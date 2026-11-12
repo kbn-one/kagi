@@ -19,8 +19,6 @@ export interface Env {
   readonly IDP_ORIGIN?: string;
   readonly RP_ORIGIN?: string;
   readonly RP_SIGNING_KEY_JWK?: string;
-  readonly TURSO_DATABASE_URL?: string;
-  readonly TURSO_AUTH_TOKEN?: string;
 }
 
 /** Parsed, typed configuration used across the server. */
@@ -40,10 +38,6 @@ export interface Config {
    * (fine for dev; set a fixed key in production).
    */
   readonly rpSigningKeyJwk: string;
-  /** Turso (libSQL) database URL for the `/api/turso` sample. */
-  readonly tursoDatabaseUrl: string;
-  /** Turso access token. */
-  readonly tursoAuthToken: string;
 }
 
 /** Derive the typed {@link Config} from a raw host env record. */
@@ -52,8 +46,6 @@ export function loadConfig(env: Env): Config {
     idpOrigin: env.IDP_ORIGIN ?? "https://id.kbn.one",
     rpOrigin: env.RP_ORIGIN ?? "",
     rpSigningKeyJwk: env.RP_SIGNING_KEY_JWK ?? "",
-    tursoDatabaseUrl: env.TURSO_DATABASE_URL ?? "",
-    tursoAuthToken: env.TURSO_AUTH_TOKEN ?? "",
   };
 }
 
@@ -62,8 +54,6 @@ const ENV_KEYS = [
   "IDP_ORIGIN",
   "RP_ORIGIN",
   "RP_SIGNING_KEY_JWK",
-  "TURSO_DATABASE_URL",
-  "TURSO_AUTH_TOKEN",
 ] as const;
 
 /**

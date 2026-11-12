@@ -17,16 +17,10 @@
  * title lives in a file, and reading every one of them at startup to fill in a card nobody may ask
  * for is work the dev server would do on every reload.
  *
- * Where the site is deployed comes from `BASE_URL`, the same variable `client/base.ts` reads. That
- * file keeps the path and throws the origin away, because a link within a site does not need one;
- * a card does. `og:image` is fetched by someone else's server, from someone else's page, so a path
- * is not an address — which is why a local build, where there is no origin to know, writes the
- * cards and leaves the tag relative rather than inventing a host.
+ * `og:image` is fetched by someone else's server, from someone else's page, so a path is not an
+ * address: the card's URL is made absolute with {@link SITE_ORIGIN}, where the site is deployed.
  */
 
-import { stripBase } from "@remix-kbn/ssg/base";
-
-import { base } from "../../client/base.ts";
 import { type Card, renderCard } from "./card.ts";
 
 /** The eyebrow every card carries unless a page asks for its own. */
@@ -40,26 +34,18 @@ export interface OgPage {
   eyebrow?: string;
 }
 
-/**
- * Where the site is deployed, or `null` when nobody said.
- *
- * The Pages workflow passes the full public URL; locally the variable is unset and there is no
- * origin — so a local build has no absolute URL to write, and says so rather than guessing one.
- */
-const siteUrl = ((): URL | null => {
-  const raw = Deno.env.get("BASE_URL")?.trim() ?? "";
-  return /^https?:\/\//.test(raw) ? new URL(raw) : null;
-})();
+/** Where the site is deployed (`cloudflare.config.ts`). */
+export const SITE_ORIGIN = "https://kagi.kbn.one";
 
-/** Image path (without the deploy prefix) -> how to fill in its card. */
+/** Image path -> how to fill in its card. */
 const cards = new Map<string, () => OgPage | Promise<OgPage>>();
 
 /**
  * Registers a page's card and returns the URL to point `og:image` at.
  *
- * @param pagePath The page's own path, as `href()` gives it — prefix included
+ * @param pagePath The page's own path, as `href()` gives it
  * @param page What the card says, or a function returning it when the page has to be read first
- * @returns The card's URL: absolute when the deploy URL is known, and a path when it is not
+ * @returns The card's absolute URL
  */
 export function ogImage(
   pagePath: string,
@@ -67,16 +53,11 @@ export function ogImage(
 ): string {
   const path = imagePath(pagePath);
   cards.set(path, typeof page === "function" ? page : () => page);
-  return siteUrl
-    ? new URL(`${base}${path}`, siteUrl.origin).href
-    : `${base}${path}`;
+  return new URL(path, SITE_ORIGIN).href;
 }
 
 /**
  * Every card's path, for the build's entry points.
- *
- * Prefix-free, because that is the form `router.ts` hands to the build — it mounts the site under
- * the deploy prefix itself.
  *
  * @returns One path per registered card
  */
@@ -91,9 +72,7 @@ export function ogPaths(): string[] {
  * @returns The PNG, or a 404 for a path no page registered
  */
 export async function serveOgImage(request: Request): Promise<Response> {
-  const path = `/${
-    stripBase(decodeURIComponent(new URL(request.url).pathname), base)
-  }`;
+  const path = decodeURIComponent(new URL(request.url).pathname);
   const page = cards.get(path);
   if (page === undefined) {
     return new Response("Not Found", {
@@ -116,33 +95,32 @@ export async function serveOgImage(request: Request): Promise<Response> {
  * The footer is the page's own address rather than anything the page said: a card is read away
  * from the site, and where it came from is the one thing its own words never say.
  *
- * @param path The card's path, prefix-free
+ * @param path The card's path
  * @param page What the page told it
  * @returns The card, ready to draw
  */
 function toCard(path: string, page: OgPage): Card {
   const pagePath = path.replace(/^\/og\//, "/").replace(/(?:index)?\.png$/, "");
-  const location = `${base}${pagePath}`;
 
   return {
     eyebrow: page.eyebrow ?? SITE_NAME,
     title: page.title,
     description: page.description,
-    footer: siteUrl ? `${siteUrl.host}${location}` : location,
+    footer: `${new URL(SITE_ORIGIN).host}${pagePath}`,
   };
 }
 
 /**
  * The card's path for a page's path.
  *
- * `/blog` becomes `/og/blog.png` and the home page becomes `/og/index.png` — the same shape the
+ * `/kagi` becomes `/og/kagi.png` and the home page becomes `/og/index.png` — the same shape the
  * pages themselves are written to, which keeps `dist/og/` browsable next to `dist/`.
  *
- * @param pagePath The page's path, prefix included
- * @returns The card's path, prefix-free
+ * @param pagePath The page's path
+ * @returns The card's path
  */
 function imagePath(pagePath: string): string {
-  const within = stripBase(decodeURIComponent(pagePath), base).replace(
+  const within = decodeURIComponent(pagePath).replace(
     /^\/+|\/+$/g,
     "",
   );

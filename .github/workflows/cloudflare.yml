@@ -16,7 +16,7 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      # Static site (BASE_URL unset: served from the root) + Worker bundle,
+      # Static site + Worker bundle,
       # arranged as the Build Output Specification for `cf deploy --prebuilt`.
       - run: deno task build:cf
       - run: deno task cf deploy --prebuilt

@@ -48,8 +48,12 @@ async function serveLightpanda(port: number) {
   }
 }
 
+/**
+ * `/kagi` hydrates: the approver island answers a click. lightpanda has no WebAuthn, so pressing
+ * 「パスキーを作成」 must end in the island's own error alert — which only a hydrated island can show.
+ */
 Deno.test({
-  name: "lightpanda: /hydration の Counter がクリックで +1 される",
+  name: "lightpanda: /kagi の island が hydrate されクリックに応答する",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
@@ -71,64 +75,28 @@ Deno.test({
         const context = await browser.createBrowserContext();
         const page = await context.newPage();
 
-        await page.goto(`http://127.0.0.1:${appPort}/hydration`);
+        await page.goto(`http://127.0.0.1:${appPort}/kagi`);
         await page.waitForFunction("globalThis.__rmxReady === true", {
           timeout: 10_000,
         });
 
-        const before = await page.$eval(
-          "output",
-          (el) => el.textContent?.trim() ?? "",
+        assertEquals(
+          await page.$eval("main h1", (el) => el.textContent?.trim()),
+          "承認",
         );
 
-        await page.$eval(
-          'button[aria-label="increment"]',
-          (el) => (el as HTMLButtonElement).click(),
-        );
-
-        await page.waitForFunction(
-          (prev: string) =>
-            document.querySelector("output")?.textContent?.trim() !== prev,
-          { timeout: 5_000 },
-          before,
-        );
-
-        const after = await page.$eval(
-          "output",
-          (el) => el.textContent?.trim() ?? "",
-        );
-
-        assertEquals(Number(after), Number(before) + 1);
-
-        // The shared-total island is a separate entrypoint: it only moves if both resolved the
-        // click store to the same module instance. It is the sum of both counters (Left starts at
-        // `before`, Right at 0), so one increment makes it `before + 1`...
-        const total = () =>
-          page.$eval(
-            "output strong",
-            (el) => Number(el.textContent),
+        await page.$$eval("button", (buttons) => {
+          const create = buttons.find((b) =>
+            b.textContent?.includes("パスキーを作成")
           );
-        await page.waitForFunction(
-          (expected: number) =>
-            Number(document.querySelector("output strong")?.textContent) ===
-              expected,
-          { timeout: 5_000 },
-          Number(before) + 1,
-        );
+          if (!create) throw new Error("no パスキーを作成 button");
+          (create as HTMLButtonElement).click();
+        });
 
-        // ...and a decrement takes it back down rather than counting another click.
-        await page.$eval(
-          'button[aria-label="decrement"]',
-          (el) => (el as HTMLButtonElement).click(),
-        );
         await page.waitForFunction(
-          (expected: number) =>
-            Number(document.querySelector("output strong")?.textContent) ===
-              expected,
+          () => document.querySelector('[role="alert"]') !== null,
           { timeout: 5_000 },
-          Number(before),
         );
-        assertEquals(await total(), Number(before));
 
         await page.close();
         await context.close();

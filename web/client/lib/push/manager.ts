@@ -17,7 +17,6 @@ import type {
   PushManagerState,
   PushSubscriptionItem,
 } from "./types.ts";
-import { base } from "../../base.ts";
 import { collectPushMetadata } from "./device.ts";
 
 const extractErrorMessage = async (response: Response): Promise<string> => {
@@ -80,7 +79,7 @@ export function createPushManager(deps: PushManagerDeps): PushManager {
     if (state.registration) return state.registration;
     try {
       if (!navigator.serviceWorker.controller) {
-        await navigator.serviceWorker.register(`${base}/sw.js`);
+        await navigator.serviceWorker.register("/sw.js");
       }
       state.registration = await navigator.serviceWorker.ready;
       return state.registration;

@@ -35,11 +35,9 @@
  * before `</head>`, so the link has to come first.
  */
 
-import { attrs, css, type Handle, type RemixNode } from "@remix-run/component";
+import { css, type Handle, type RemixNode } from "@remix-run/component";
 
-import { base, BASE_META_NAME } from "./base.ts";
-import { HELPER_BUTTON_ID, HELPER_SRC_ATTRIBUTE } from "./helper/button.ts";
-import { NavAuth } from "./islands/nav_auth.tsx"; // [feature:signin]
+import { NavAuth } from "./islands/nav_auth.tsx";
 import { routes } from "./routes.ts";
 import { color, contentWidth } from "./tokens.ts";
 
@@ -59,31 +57,14 @@ export interface LayoutProps {
    */
   image: string | null;
   /**
-   * The page's viewport meta, for the rare page that needs one of its own.
-   *
-   * Optional because almost nothing does: `width=device-width, initial-scale=1` is right for a
-   * document. The exception is a page laying out to the edges of a phone screen, which needs
-   * `viewport-fit=cover` before `env(safe-area-inset-*)` reports anything but zero — and that is
-   * a choice per page, since covering the notch on an article would only push its text under one.
-   */
-  viewport?: string;
-  /**
-   * Render the page as the whole of `<body>`, with no header, nav or footer around it.
-   *
-   * For a page that is an app screen rather than a document — a game that owns the display. The
-   * shell's help button goes with the rest of it.
-   */
-  bare?: boolean;
-  /**
    * The client runtime, for a page that places an island — resolved by `router.tsx`, because a URL
    * under the deploy prefix and the bundler's naming is a thing only the server knows.
    *
    * The shell has to be handed it rather than finding out for itself: entries are resolved while
    * the tree renders, and by then the `<script>` that boots them has already been written.
    *
-   * Required, and `null` for a page with no islands — the blog listing ships no JavaScript at
-   * all. It is not optional because forgetting it is exactly the bug that shipped a showcase whose
-   * eighteen islands never hydrated: a page rendered fine, and nothing on it worked.
+   * Required, and `null` for a page with no islands. It is not optional because forgetting it
+   * renders a page that looks fine and on which nothing works.
    */
   script: ClientRuntime | null;
   /**
@@ -93,12 +74,6 @@ export interface LayoutProps {
    * `render()` stamps the ones it generates. Absent for a render with no `csp()` in front of it.
    */
   nonce?: string;
-  /**
-   * Render the shell's links as document navigations — see {@link ShellProps.documentLinks}.
-   *
-   * [feature:spa] delete this prop with the feature — see TEMPLATE.md.
-   */
-  documentLinks?: boolean;
   children: RemixNode;
 }
 
@@ -107,15 +82,6 @@ export interface ClientRuntime {
   src: string;
   /** The chunks it imports, for `<link rel="modulepreload">`. */
   preloads: readonly string[];
-  /**
-   * Where the chat's chunk is — see `client/helper/`.
-   *
-   * It rides along with the runtime rather than arriving as a prop of its own, because it is the
-   * same kind of thing and wanted in the same places: a page that loads a runtime is exactly the
-   * page whose help button can do anything. Deliberately *not* in `preloads` — the point of the
-   * separate chunk is that a visit which never opens the chat never downloads it.
-   */
-  helper: string;
 }
 
 /**
@@ -123,12 +89,11 @@ export interface ClientRuntime {
  *
  * It lives here rather than beside the router because it is the shell's half of the bargain — the
  * title it puts in `<head>`, the card it draws from, and whether it writes a `<script>`. Both
- * things that build a `Layout` read it: `server/router.tsx` for the pages it maps, and
- * `server/blog/mod.tsx` for the two screens its controller renders.
+ * things that build a `Layout` read it: `server/router.tsx` for the pages it maps.
  *
  * `hydrate` is required rather than optional, and that is the point of stating this at all. An
  * omitted flag is indistinguishable from a page that genuinely ships nothing, and the page still
- * renders — which is how a showcase once shipped with eighteen islands that never hydrated.
+ * renders.
  *
  * @typeParam Props What the page's component is handed, for a screen a controller fills in. The
  * default is `Handle`'s own, so a page that takes nothing is written `Handle` with no argument.
@@ -139,10 +104,6 @@ export interface PageModule<Props = Record<string, never>> {
   description?: string;
   /** Whether the page places a client entry, so the shell boots the runtime for it. */
   hydrate: boolean;
-  /** Set by a page that needs a viewport meta of its own — `viewport-fit=cover`, in practice. */
-  viewport?: string;
-  /** Set by a page that is the whole screen — see {@link LayoutProps.bare}. */
-  bare?: boolean;
 }
 
 /**
@@ -155,15 +116,13 @@ export function Layout(handle: Handle<LayoutProps>) {
   return () => {
     const props = handle.props;
 
-    // `lang="ja"`: the app pages (`/my`, `/hydration`) are Japanese; the demo pages brought over
-    // from the SSG starter are English. A site writing in one language changes this attribute.
     return (
       <html lang="ja">
         <head>
           <meta charset="utf-8" />
           <meta
             name="viewport"
-            content={props.viewport ?? "width=device-width, initial-scale=1"}
+            content="width=device-width, initial-scale=1"
           />
           <title>{props.title}</title>
           {props.description
@@ -182,19 +141,11 @@ export function Layout(handle: Handle<LayoutProps>) {
               </>
             )
             : null}
-          {
-            /*
-            The deploy prefix, for the browser. It cannot work this out for itself — `/repo/blog`
-            and `/blog` are the same page under two deploys — and `client/spa/app.tsx` matches URLs
-            against route patterns that carry it. See `client/base.ts`.
-          */
-          }
-          <meta name={BASE_META_NAME} content={base} />
-          <link rel="stylesheet" href={`${base}/static/app.css`} />
+          <link rel="stylesheet" href="/static/app.css" />
           <link
             rel="icon"
             type="image/svg+xml"
-            href={`${base}/static/favicon.svg`}
+            href="/static/favicon.svg"
           />
           {(props.script?.preloads ?? []).map((href) => (
             <link
@@ -206,14 +157,7 @@ export function Layout(handle: Handle<LayoutProps>) {
           ))}
         </head>
         <body>
-          {props.bare ? props.children : (
-            <Shell
-              documentLinks={props.documentLinks}
-              helper={props.script?.helper ?? null}
-            >
-              {props.children}
-            </Shell>
-          )}
+          <Shell>{props.children}</Shell>
           {props.script
             ? (
               <script
@@ -233,128 +177,29 @@ export function Layout(handle: Handle<LayoutProps>) {
 /** What the shell wraps a page in. */
 export interface ShellProps {
   children: RemixNode;
-  /**
-   * Render the shell's own links as document navigations.
-   *
-   * [feature:spa] delete this prop with the feature — see TEMPLATE.md.
-   *
-   * Every link here is a soft navigation by default, which is what the rest of the site wants. A
-   * page whose `<body>` belongs to a client router is the exception, in both directions:
-   *
-   * - **Leaving it**, which is what this prop is for: the runtime would route a click on `Blog`
-   *   through *that* router, which has never heard of `/blog`.
-   * - **Entering it**, which the `SPA` link below handles on its own, because it has to be a
-   *   document load from every page rather than only from these.
-   *
-   * `data-rmx-document` hands the navigation back to the browser in both cases.
-   */
-  documentLinks?: boolean;
-  /**
-   * The chat's chunk URL, or `null` for a page that ships no JavaScript — see `client/helper/`.
-   *
-   * Doubles as whether to render the button at all, which is the same question: the button is
-   * plain markup and its behaviour is attached by the page's runtime, so on a page without one it
-   * would be a control that does nothing. The blog listing ships none on purpose.
-   */
-  helper?: string | null;
 }
 
 /**
  * Everything inside `<body>`: the header, the page, and the footer.
  *
- * Split out of {@link Layout} because it is rendered by two different things. The server renders it
- * as part of the document; `client/spa/app.tsx` renders it again in the browser, because a
- * `@remix-run/spa` router owns the whole of `<body>` and would otherwise replace the shell with
- * nothing. Both place this component, so there is one shell and not two that have to agree.
- *
- * `<head>` is deliberately not in here. It stays the server's — the title, the social card and the
- * stylesheet are what a crawler and a link preview read, and neither runs the page.
- *
- * @param handle The page to wrap, and how its links navigate
+ * @param handle The page to wrap
  * @returns The body's contents
  */
 export function Shell(handle: Handle<ShellProps>) {
   return () => {
-    // `undefined` rather than `false`: an attribute set to "false" is still an attribute, and the
-    // runtime looks for its presence.
-    const document = handle.props.documentLinks ? "" : undefined;
-
     return (
       <>
         <header mix={[bandStyle, headerStyle]}>
           <a
             mix={brandStyle}
             href={routes.home.href()}
-            data-rmx-document={document}
           >
             kagi
           </a>
           <nav mix={navStyle}>
-            <a href={routes.home.href()} data-rmx-document={document}>Home</a>
-            {/* [feature:kagi] */}
-            <a href={routes.kagi.href()} data-rmx-document={document}>承認</a>
-            <a href={routes.hydration.href()} data-rmx-document={document}>
-              Hydration
-            </a>
-            <a href={routes.blog.index.href()} data-rmx-document={document}>
-              Blog
-            </a>
-            {/* [feature:fullscreen] */}
-            <a href={routes.fullscreen.href()} data-rmx-document={document}>
-              Fullscreen
-            </a>
-            {/* [feature:showcase] */}
-            <a href={routes.showcase.href()} data-rmx-document={document}>
-              UI showcase
-            </a>
-            {
-              /*
-              [feature:spa]
-
-              Always a document navigation, on every page — not just on the ones `documentLinks`
-              covers. A document gets one runtime, and this link leads to the page that boots the
-              other one: reached by a soft navigation, the demo's `run()` would arrive in a document
-              `hydration.ts` already owns, never take over, and leave every link on it loading pages
-              the slow way. Entering a page that starts a different runtime is a document load.
-            */
-            }
-            <a href={routes.spa.show.href({ id: "1" })} data-rmx-document="">
-              SPA
-            </a>
-            {
-              /*
-              The chat's affordance, and only the affordance: `@remix-kbn/helper-agent` draws the
-              panel and leaves opening it to the site, which is the right split — where a support
-              button goes is a thing about this site and nothing about the package.
-
-              A plain `<button>` rather than an island. It needs no state and no rendering, only a
-              listener, and `client/helper/install.ts` attaches that from whichever runtime the
-              page loaded. What it opens arrives on the first click, in a chunk of its own.
-            */
-            }
-            {handle.props.helper
-              ? (
-                <button
-                  type="button"
-                  id={HELPER_BUTTON_ID}
-                  mix={[
-                    helperButtonStyle,
-                    attrs({ [HELPER_SRC_ATTRIBUTE]: handle.props.helper }),
-                  ]}
-                >
-                  Help
-                </button>
-              )
-              : null}
-            {/* [feature:signin] */}
-            {handle.props.documentLinks
-              ? (
-                // A `@remix-run/spa` router renders this shell in the browser and has no way to
-                // hydrate an island, so the sign-in island is replaced by a plain link that leaves
-                // the client router. `/my` has the real control.
-                <a href={routes.my.href()} data-rmx-document="">Sign in</a>
-              )
-              : <NavAuth myHref={routes.my.href()} />}
+            <a href={routes.home.href()}>Home</a>
+            <a href={routes.kagi.href()}>承認</a>
+            <NavAuth myHref={routes.my.href()} />
           </nav>
         </header>
         <main mix={[bandStyle, mainStyle]}>{handle.props.children}</main>
@@ -405,18 +250,6 @@ const navStyle = css({
   display: "flex",
   flexWrap: "wrap",
   gap: "1rem",
-});
-
-/** Styled to sit among the nav's links rather than shout over them. */
-const helperButtonStyle = css({
-  font: "inherit",
-  cursor: "pointer",
-  padding: "0 0.6rem",
-  border: `1px solid ${color.border}`,
-  borderRadius: "999px",
-  background: "transparent",
-  color: color.fg,
-  "&:hover": { borderColor: color.accent, color: color.accent },
 });
 
 const mainStyle = css({ paddingBlock: "2.5rem" });

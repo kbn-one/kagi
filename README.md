@@ -38,7 +38,6 @@
 API はスマホのブラウザーから呼ぶので、呼び先が CORS でこのオリジンを許可して
 いる必要がある（`api.github.com` は許可している）。
 
-開発のルールは [CLAUDE.md](./CLAUDE.md)、テンプレからの残りの整理は
-[TEMPLATE.md](./TEMPLATE.md)。
+開発のルールは [CLAUDE.md](./CLAUDE.md)。
 
 ref: https://github.com/remix-run/remix

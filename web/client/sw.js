@@ -6,7 +6,7 @@
  * subscription itself is created in the page (see lib/push/manager.ts) and
  * stored on the IdP; this worker only handles delivery + click routing.
  *
- * Served at `${base}/sw.js` by the `sw.js` route in server/router.tsx (verbatim).
+ * Served at `/sw.js` by the `sw.js` route in server/router.tsx (verbatim).
  */
 
 const DEFAULT_TITLE = "kagi";

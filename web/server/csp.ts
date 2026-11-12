@@ -3,7 +3,7 @@ import { csp, getCspNonce } from "@remix-run/csp-middleware";
 /**
  * The Content Security Policy for every HTML response: a "strict CSP". Scripts run only with this
  * request's nonce, and what they import from there is trusted (`'strict-dynamic'`), so the islands'
- * chunks, the helper's lazily imported chunk and the SPA runtime need no allowlist. Plugins and a
+ * chunks need no allowlist. Plugins and a
  * rewritten `<base>` are off.
  *
  * `csp()` makes the nonce; `render()` stamps it on what it generates (the import map, module

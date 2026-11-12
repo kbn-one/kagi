@@ -135,32 +135,3 @@
     font-feature-settings: normal;
   }
 }
-
-/*
- * The share buttons — `<share-buttons>`, from @kuboon/share-element, on the line under each
- * article. See `client/islands/share.tsx` for the other half.
- *
- * It renders in light DOM with `:where(...)` defaults exactly so a page can restyle it, and this
- * is a page doing that: the package's own borders and backgrounds are fixed light-mode greys, so
- * without these three rules the buttons would stay white-on-white in dark mode. Nothing here
- * touches layout or which buttons are shown — the row is a flex line and the collapse to the
- * native share sheet on a touch device are both the package's, and both are what this site wants.
- *
- * Unlayered, and that is the part not to "tidy up" into `@layer app`. The package appends its
- * defaults as a plain `<style>` with no layer of its own, and unlayered CSS outranks every layer
- * whatever the specificity — so a rule in `app` loses to `:where(.share-buttons__button)` even
- * though `:where()` counts for nothing. Verified both ways in Chromium.
- */
-
-.share-buttons__button {
-  border-color: var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg);
-  color: var(--fg);
-}
-
-.share-buttons__button:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--bg);
-}

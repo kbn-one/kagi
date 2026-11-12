@@ -22,22 +22,13 @@ Deno.test("worker serves the RP JWKS", async () => {
   assertEquals(body.keys[0].kty, "EC");
 });
 
-Deno.test("worker /api/turso degrades to 503 without Turso env", async () => {
-  const body = await assertProblem(await get("/api/turso"), 503);
-  assertEquals(body.configured, false);
-});
-
-Deno.test("worker /api/protected rejects a request without a DPoP proof", async () => {
-  await assertProblem(await get("/api/protected"), 401);
-});
-
 Deno.test("worker does not render pages (static assets answer those)", async () => {
-  await assertProblem(await get("/hydration"), 404);
+  await assertProblem(await get("/kagi"), 404);
 });
 
 const post = (headers: Record<string, string>) =>
   worker.fetch(
-    new Request("http://x/api/notify", {
+    new Request("http://x/api/sub/abcdefghijklmnopqrstuv/req", {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
       body: "{}",
@@ -57,8 +48,8 @@ Deno.test("worker rejects a cross-origin browser POST (cop)", async () => {
 
 Deno.test("worker lets a same-origin POST through to the action", async () => {
   const res = await post({ "sec-fetch-site": "same-origin" });
-  // The empty body is the action's own 400, not cop's 403.
-  const body = await assertProblem(res, 400);
+  // The unregistered id is the action's own 404, not cop's 403.
+  const body = await assertProblem(res, 404);
   assertEquals(typeof body.detail, "string");
 });
 

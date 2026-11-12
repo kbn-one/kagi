@@ -100,6 +100,12 @@ async function seal(
   localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
 }
 
+function requirePasskeys(): void {
+  if (!passkeysAvailable()) {
+    throw new Error("このブラウザーはパスキーに対応していません。");
+  }
+}
+
 /** Asks the passkey for its PRF output on `salt`. Throws when the user cancels. */
 async function prf(credentialId: string, salt: string): Promise<ArrayBuffer> {
   const credential = await navigator.credentials.get({
@@ -146,6 +152,7 @@ const unlockWith = async (
 
 /** Creates a passkey and an empty vault sealed with it. Replaces any existing vault. */
 export async function createVault(): Promise<UnlockedVault> {
+  requirePasskeys();
   const credential = await navigator.credentials.create({
     publicKey: {
       rp: { name: "kagi", id: location.hostname },
@@ -186,6 +193,7 @@ export async function createVault(): Promise<UnlockedVault> {
 export async function unlockVault(): Promise<UnlockedVault> {
   const stored = readStored();
   if (!stored) throw new Error("秘密がまだ作成されていません。");
+  requirePasskeys();
   return unlockWith(stored, await prf(stored.credentialId, stored.salt));
 }
 

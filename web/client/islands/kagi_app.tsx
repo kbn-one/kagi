@@ -80,6 +80,13 @@ export const KagiApp = clientEntry(
     let status: { message: string; kind: AlertKind } | null = null;
     let busy = false;
 
+    /**
+     * Whether the browser-only state below has been read. Until then the island renders what the
+     * server rendered: anything read from localStorage or the browser's APIs during the first render
+     * would not match the server's HTML, and hydration would duplicate the mismatched part.
+     */
+    let loaded = false;
+    let passkeys = false;
     let vaultExists = false;
     /** Held only while the secrets card is open for editing. */
     let unlocked: UnlockedVault | null = null;
@@ -120,9 +127,16 @@ export const KagiApp = clientEntry(
     };
 
     if (isClientEnv) {
-      vaultExists = hasVault();
-      sub = readSubscription();
-      startConnection();
+      // After hydration, not during it — see `loaded`.
+      setTimeout(() => {
+        if (handle.signal.aborted) return;
+        passkeys = passkeysAvailable();
+        vaultExists = hasVault();
+        sub = readSubscription();
+        loaded = true;
+        startConnection();
+        handle.update();
+      }, 0);
       handle.signal.addEventListener("abort", () => connection?.close());
       void sessionStore.load().then(() => {
         ready = true;
@@ -267,10 +281,11 @@ export const KagiApp = clientEntry(
           秘密はこのブラウザーの localStorage
           に、パスキーで暗号化して保存します。 サーバーには送りません。
         </p>
-        {!passkeysAvailable() && isClientEnv && (
+        {!loaded && <p mix={mutedStyle} aria-busy="true">…</p>}
+        {loaded && !passkeys && (
           <p mix={mutedStyle}>このブラウザーはパスキーに対応していません。</p>
         )}
-        {!vaultExists && (
+        {loaded && !vaultExists && (
           <div mix={rowStyle}>
             <button
               type="button"
@@ -387,8 +402,10 @@ export const KagiApp = clientEntry(
       return (
         <section mix={cardStyle}>
           <h2>承認者の登録</h2>
-          {!ready && <p mix={mutedStyle} aria-busy="true">…</p>}
-          {ready && !sub && (
+          {!(ready && loaded) && !sub && (
+            <p mix={mutedStyle} aria-busy="true">…</p>
+          )}
+          {ready && loaded && !sub && (
             <div>
               <p mix={mutedStyle}>
                 リクエストが来たら、id.kbn.one 経由でこの端末に通知が届きます。

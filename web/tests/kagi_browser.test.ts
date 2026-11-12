@@ -49,7 +49,7 @@ async function serveLightpanda(port: number) {
 }
 
 /**
- * `/kagi` hydrates: the approver island answers a click. lightpanda has no WebAuthn, so pressing
+ * `/kagi` hydrates without duplicating markup, and the approver island answers a click. lightpanda has no WebAuthn, so pressing
  * 「パスキーを作成」 must end in the island's own error alert — which only a hydrated island can show.
  */
 Deno.test({
@@ -97,6 +97,49 @@ Deno.test({
           () => document.querySelector('[role="alert"]') !== null,
           { timeout: 5_000 },
         );
+
+        // Hydration must not duplicate the server's markup: one button per action.
+        const labels = () =>
+          page.$$eval(
+            "button",
+            (buttons) => buttons.map((b) => b.textContent?.trim() ?? ""),
+          );
+        assertEquals(
+          (await labels()).filter((l) => l === "パスキーを作成").length,
+          1,
+        );
+
+        // A returning approver has a vault in localStorage, which the server cannot see. After a
+        // reload the island must show the unlock action — once — and not the create action.
+        await page.evaluate(() =>
+          localStorage.setItem(
+            "kagi.vault",
+            JSON.stringify({
+              v: 1,
+              credentialId: "",
+              salt: "",
+              iv: "",
+              ciphertext: "",
+            }),
+          )
+        );
+        await page.goto(`http://127.0.0.1:${appPort}/kagi`);
+        await page.waitForFunction("globalThis.__rmxReady === true", {
+          timeout: 10_000,
+        });
+        await page.waitForFunction(
+          () =>
+            [...document.querySelectorAll("button")].some((b) =>
+              b.textContent?.includes("パスキーで開いて編集")
+            ),
+          { timeout: 5_000 },
+        );
+        const after = await labels();
+        assertEquals(
+          after.filter((l) => l === "パスキーで開いて編集").length,
+          1,
+        );
+        assertEquals(after.includes("パスキーを作成"), false);
 
         await page.close();
         await context.close();

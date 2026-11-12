@@ -20,7 +20,7 @@
       "description": "Download the lightpanda binary used by test:browser (a pinned release, not nightly)",
       "command": "deno run -A npm:@lightpanda/browser install 1.0.3"
     },
-    "check": "deno task --cwd web/client check && deno task --cwd web/server check && deno lint && deno fmt --check"
+    "check": "deno task --cwd web/client check && deno task --cwd web/server check && deno check tools && deno lint && deno fmt --check"
   },
   "permissions": {
     "default": {

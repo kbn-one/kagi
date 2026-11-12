@@ -108,3 +108,16 @@ Deno.test("/api/sub answers problems for unknown subscriptions", async () => {
   const bad = await router.fetch(new Request("http://x/api/sub/short/res"));
   assertEquals(bad.status, 404);
 });
+
+Deno.test("GET /docs explains setup, requests and the git credential helper", async () => {
+  const res = await router.fetch(new Request("http://x/docs"));
+  assertEquals(res.status, 200);
+  const html = await res.text();
+  assertStringIncludes(html, "<h1>使い方</h1>");
+  assertStringIncludes(html, "github-app-token");
+  assertStringIncludes(html, "credential.https://github.com.useHttpPath");
+  assertStringIncludes(html, "tools/git_credential_kagi.ts");
+  // Reachable from every page, so the static build writes it.
+  const home = await (await router.fetch(new Request("http://x/"))).text();
+  assertStringIncludes(home, 'href="/docs"');
+});

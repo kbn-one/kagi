@@ -5,6 +5,8 @@
  */
 
 import {
+  type HttpRequest,
+  isAppTokenRequest,
   type KagiRequest,
   type KagiResult,
   methodOf,
@@ -13,11 +15,30 @@ import {
 
 export type Secrets = Record<string, string>;
 
-/** A secret as the vault stores it. `hosts` limits where it may be sent; empty means anywhere. */
-export interface SecretEntry {
+/** A secret as the vault stores it. */
+export type SecretEntry = TextSecret | GithubAppSecret;
+
+/** A value for `[NAME]` placeholders. `hosts` limits where it may be sent; empty means anywhere. */
+export interface TextSecret {
+  kind?: "text";
   value: string;
   hosts: string[];
 }
+
+/**
+ * A GitHub App: its ID and private key (`value`, PEM). Only ever used to mint repository-limited
+ * tokens on this phone (`github_app.ts`), never sent anywhere and never placed in a request.
+ */
+export interface GithubAppSecret {
+  kind: "github-app";
+  /** The App ID or Client ID — what the App's JWT carries as `iss`. */
+  appId: string;
+  value: string;
+  hosts: [];
+}
+
+export const isAppSecret = (e: SecretEntry): e is GithubAppSecret =>
+  e.kind === "github-app";
 
 const fill = (s: string, secrets: Secrets): string =>
   s.replace(PLACEHOLDER, (whole, name: string) => secrets[name] ?? whole);
@@ -36,7 +57,7 @@ function fillDeep(value: unknown, secrets: Secrets): unknown {
 }
 
 /** The host a request goes to, which is what the approver and each secret's `hosts` judge. */
-export const hostOf = (req: KagiRequest): string => new URL(req.url).host;
+export const hostOf = (req: HttpRequest): string => new URL(req.url).host;
 
 /**
  * Why the secrets cannot be used for this request, or `null` when they can: a secret the vault
@@ -46,10 +67,20 @@ export function secretsProblem(
   req: KagiRequest,
   vault: Record<string, SecretEntry>,
 ): string | null {
+  if (isAppTokenRequest(req)) {
+    const entry = vault[req.app];
+    if (!entry) return `GitHub App ${req.app} が保存されていません`;
+    if (!isAppSecret(entry)) return `${req.app} は GitHub App ではありません`;
+    return null;
+  }
   const host = hostOf(req);
   for (const name of req.secrets) {
     const entry = vault[name];
     if (!entry) return `秘密 ${name} が保存されていません`;
+    // The App's private key would leave the phone inside the request.
+    if (isAppSecret(entry)) {
+      return `${name} は GitHub App の鍵なので、リクエストには埋め込めません`;
+    }
     if (entry.hosts.length && !entry.hosts.includes(host)) {
       return `秘密 ${name} は ${host} への送信が許可されていません`;
     }
@@ -59,7 +90,7 @@ export function secretsProblem(
 
 /** The `fetch()` arguments for a request with its placeholders filled. */
 export function buildFetch(
-  req: KagiRequest,
+  req: HttpRequest,
   secrets: Secrets,
 ): { url: string; init: RequestInit } {
   const headers = new Headers();
@@ -96,7 +127,7 @@ export function scrub(text: string, secrets: Secrets): string {
 
 /** Makes the call and returns its answer with every secret scrubbed out of it. */
 export async function execute(
-  req: KagiRequest,
+  req: HttpRequest,
   secrets: Secrets,
   fetchImpl: typeof fetch = fetch,
 ): Promise<KagiResult> {

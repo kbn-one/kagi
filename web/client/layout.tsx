@@ -199,6 +199,7 @@ export function Shell(handle: Handle<ShellProps>) {
           <nav mix={navStyle}>
             <a href={routes.home.href()}>Home</a>
             <a href={routes.kagi.href()}>承認</a>
+            <a href={routes.docs.href()}>使い方</a>
             <NavAuth myHref={routes.my.href()} />
           </nav>
         </header>

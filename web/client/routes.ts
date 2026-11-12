@@ -19,6 +19,8 @@ export const routes = route("", {
   home: get("/"),
   /** The approver's screen: secrets, subscription, and the requests to approve. */
   kagi: get("/kagi"),
+  /** How to set up the phone, send requests, and limit git push with a GitHub App. */
+  docs: get("/docs"),
   /** Sign-in with id.kbn.one and push registration. */
   my: get("/my"),
   /** RP public JWKS — lets the IdP verify our `private_key_jwt` assertions for the push. */

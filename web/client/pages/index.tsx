@@ -22,6 +22,8 @@ export default function Home(_handle: Handle) {
       </p>
       <p>
         <a href={routes.kagi.href()}>承認者の画面を開く</a>
+        {" / "}
+        <a href={routes.docs.href()}>使い方</a>
       </p>
 
       <section mix={cardStyle}>

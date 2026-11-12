@@ -554,6 +554,14 @@ export const KagiApp = clientEntry(
                 リクエストを送れるので、ID は秘密にしてください。
               </p>
               <pre mix={codeStyle}>{usage(endpoint, sub.id)}</pre>
+              <p mix={mutedStyle}>
+                git push を GitHub App で 1
+                リポジトリに絞るなら、エージェント側で:
+              </p>
+              <pre mix={codeStyle}>{gitHelperConfig(endpoint, sub.id)}</pre>
+              <p mix={mutedStyle}>
+                詳しくは <a href={routes.docs.href()}>使い方</a>。
+              </p>
               <div mix={rowStyle}>
                 <button
                   type="button"
@@ -750,6 +758,23 @@ function httpDetails(req: HttpRequest) {
       )}
     </>
   );
+}
+
+function gitHelperConfig(
+  endpoint: (path: string) => string,
+  id: string,
+): string {
+  const base = endpoint(routes.api.sub.register.href({ id }));
+  const host = (() => {
+    try {
+      return new URL(base).host;
+    } catch {
+      return "kagi.kbn.one";
+    }
+  })();
+  return `git config --global credential.https://github.com.useHttpPath true
+git config --global credential.https://github.com.helper \\
+  '!KAGI_URL=${base} deno run --allow-net=${host} --allow-env https://raw.githubusercontent.com/kbn-one/kagi/main/tools/git_credential_kagi.ts'`;
 }
 
 function usage(endpoint: (path: string) => string, id: string): string {

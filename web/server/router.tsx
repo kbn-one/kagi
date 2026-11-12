@@ -35,6 +35,7 @@ import { Layout, type PageModule } from "../client/layout.tsx";
 import { routes } from "../client/routes.ts";
 
 import * as Home from "../client/pages/index.tsx";
+import * as Docs from "../client/pages/docs.tsx";
 import * as Kagi from "../client/pages/kagi.tsx";
 import * as My from "../client/pages/my.tsx";
 
@@ -115,6 +116,7 @@ const top = createController(routes, {
   actions: {
     home: pageAction(routes.home, Home),
     kagi: pageAction(routes.kagi, Kagi),
+    docs: pageAction(routes.docs, Docs),
     my: pageAction(routes.my, My),
     jwks: jwksAction,
   },

@@ -24,6 +24,15 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   端末鍵）、`connection.ts`（WebSocket。結果はメモリにだけ保持）、
   `substitute.ts`（`[NAME]` の置換、送信先ホスト制限、結果からの秘密の除去）、
   画面は `islands/kagi_app.tsx`（`/kagi`）。
+- リクエストは 2 種類（`protocol.ts` の `KagiRequest`）: `[NAME]` を埋めて API
+  を 呼ぶ `http`（既定）と、GitHub App の installation token を 1
+  リポジトリ・指定 権限・1 時間に絞って発行する
+  `github-app-token`（`lib/kagi/github_app.ts`。App の秘密鍵は vault の
+  `kind: "github-app"` に入り、`http` リクエストには埋め込め
+  ない）。エージェント側は `tools/git_credential_kagi.ts`（git credential
+  helper。 `useHttpPath` で push
+  先のリポジトリ名を受け取り、それだけのトークンを頼む）。 App の設定手順は
+  `README.md`。
 - 通知は既存の id.kbn.one 連携（`server/lib/push/client.ts`）で承認者の userId
   へ送る。`RP_ORIGIN`（`https://kagi.kbn.one`）を IdP の `AUTHORIZE_WHITELIST`
   に入れ、Worker secret の `RP_SIGNING_KEY_JWK` を設定しておく。

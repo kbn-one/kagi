@@ -4,7 +4,7 @@
  */
 
 import type { Transaction } from "../../../client/lib/kagi/protocol.ts";
-import { methodOf } from "../../../client/lib/kagi/protocol.ts";
+import { secretNamesOf, summarize } from "../../../client/lib/kagi/protocol.ts";
 import { routes } from "../../../client/routes.ts";
 import { getConfig } from "../../config.ts";
 import { sendRpNotification } from "../push/client.ts";
@@ -22,17 +22,12 @@ export async function notifyApprover(
   tx: Transaction,
 ): Promise<boolean> {
   const { request } = tx;
-  let host = request.url;
-  try {
-    host = new URL(request.url).host;
-  } catch { /* parseKagiRequest already checked; keep the raw text */ }
+  const secrets = secretNamesOf(request);
   const results = await sendRpNotification({
     userIds: [registration.userId],
     notification: {
       title: "kagi: 承認リクエスト",
-      body: `${methodOf(request)} ${host}\n秘密: ${
-        request.secrets.join(", ") || "なし"
-      }`,
+      body: `${summarize(request)}\n秘密: ${secrets.join(", ") || "なし"}`,
       url: approvalUrl(tx),
       tag: `kagi-${tx.id}`,
       requireInteraction: true,

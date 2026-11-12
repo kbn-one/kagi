@@ -13,8 +13,15 @@
  *   WebSocket open to the server ({@link ServerMessage} / {@link ClientMessage}).
  */
 
-/** What a requester asks the approver to call. `[NAME]` in a string is replaced by secret NAME. */
-export interface KagiRequest {
+/**
+ * What a requester asks for: an HTTP call made with secrets ({@link HttpRequest}), or a short-lived
+ * GitHub token limited to named repositories ({@link GithubAppTokenRequest}).
+ */
+export type KagiRequest = HttpRequest | GithubAppTokenRequest;
+
+/** An API call for the approver to make. `[NAME]` in a string is replaced by secret NAME. */
+export interface HttpRequest {
+  type?: "http";
   /** The secret names the request uses. Every `[NAME]` placeholder must be listed here. */
   secrets: string[];
   url: string;
@@ -24,6 +31,31 @@ export interface KagiRequest {
   /** A JSON value (sent as JSON) or a string (sent verbatim). */
   body?: unknown;
 }
+
+/**
+ * A GitHub App installation token, minted on the approver's phone with the App's private key (vault
+ * secret `app`) and limited to `repositories` of `owner` and to `permissions`. It expires in an
+ * hour. The requester receives GitHub's answer: `{ token, expires_at, permissions, repositories }`.
+ *
+ * Both lists must be non-empty: GitHub reads an empty `repositories` as every repository the App is
+ * installed on, and empty `permissions` as every permission the App has.
+ */
+export interface GithubAppTokenRequest {
+  type: "github-app-token";
+  /** The vault secret holding the App (its ID and private key). */
+  app: string;
+  owner: string;
+  repositories: string[];
+  permissions: Record<string, "read" | "write">;
+}
+
+export const isAppTokenRequest = (
+  req: KagiRequest,
+): req is GithubAppTokenRequest => req.type === "github-app-token";
+
+/** The vault secrets a request uses. */
+export const secretNamesOf = (req: KagiRequest): string[] =>
+  isAppTokenRequest(req) ? [req.app] : req.secrets;
 
 /** The approver's call, as the requester receives it. Secret values are scrubbed from it. */
 export interface KagiResult {
@@ -113,7 +145,7 @@ export function placeholdersIn(value: unknown, out = new Set<string>()) {
 }
 
 /** The HTTP method a request will be made with. */
-export const methodOf = (req: KagiRequest): string =>
+export const methodOf = (req: HttpRequest): string =>
   (req.method ?? (req.body === undefined ? "GET" : "POST")).toUpperCase();
 
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
@@ -130,6 +162,10 @@ export function parseKagiRequest(value: unknown): KagiRequest | string {
     return "Body must be a JSON object";
   }
   const v = value as Record<string, unknown>;
+  if (v.type === "github-app-token") return parseAppTokenRequest(v);
+  if (v.type !== undefined && v.type !== "http") {
+    return 'type must be "http" or "github-app-token"';
+  }
 
   if (
     !Array.isArray(v.secrets) ||
@@ -180,7 +216,7 @@ export function parseKagiRequest(value: unknown): KagiRequest | string {
     }
   }
 
-  const req: KagiRequest = { secrets, url: v.url };
+  const req: HttpRequest = { secrets, url: v.url };
   if (v.method !== undefined) req.method = (v.method as string).toUpperCase();
   if (headers) req.headers = headers;
   if (v.body !== undefined) req.body = v.body;
@@ -195,4 +231,79 @@ export function parseKagiRequest(value: unknown): KagiRequest | string {
     if (!used.has(name)) return `Secret ${name} is not used by any placeholder`;
   }
   return req;
+}
+
+const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const GITHUB_REPO = /^[A-Za-z0-9._-]{1,100}$/;
+const GITHUB_PERMISSION = /^[a-z_]{1,64}$/;
+/** More than this is not "the repository this task is about". */
+export const MAX_TOKEN_REPOSITORIES = 10;
+
+function parseAppTokenRequest(
+  v: Record<string, unknown>,
+): GithubAppTokenRequest | string {
+  if (typeof v.app !== "string" || !isSecretName(v.app)) {
+    return "app must be a secret name";
+  }
+  if (typeof v.owner !== "string" || !GITHUB_OWNER.test(v.owner)) {
+    return "owner must be a GitHub user or organization name";
+  }
+  if (
+    !Array.isArray(v.repositories) ||
+    !v.repositories.every((r): r is string =>
+      typeof r === "string" && GITHUB_REPO.test(r) && r !== "." && r !== ".."
+    )
+  ) {
+    return "repositories must be an array of repository names (without the owner)";
+  }
+  const repositories = [...new Set(v.repositories)];
+  // GitHub reads an empty list as "every repository the App can reach".
+  if (repositories.length === 0) return "repositories must not be empty";
+  if (repositories.length > MAX_TOKEN_REPOSITORIES) {
+    return `At most ${MAX_TOKEN_REPOSITORIES} repositories`;
+  }
+  if (
+    !v.permissions || typeof v.permissions !== "object" ||
+    Array.isArray(v.permissions)
+  ) {
+    return 'permissions must be an object like {"contents":"write"}';
+  }
+  const permissions: Record<string, "read" | "write"> = {};
+  for (const [name, level] of Object.entries(v.permissions)) {
+    if (!GITHUB_PERMISSION.test(name)) {
+      return `Invalid permission name: ${JSON.stringify(name)}`;
+    }
+    if (level !== "read" && level !== "write") {
+      return `Permission ${name} must be "read" or "write"`;
+    }
+    permissions[name] = level;
+  }
+  // GitHub reads no permissions as "every permission the App has".
+  if (Object.keys(permissions).length === 0) {
+    return "permissions must not be empty";
+  }
+  return {
+    type: "github-app-token",
+    app: v.app,
+    owner: v.owner,
+    repositories,
+    permissions,
+  };
+}
+
+/** A one-line summary of a request, for the notification and the approval list. */
+export function summarize(req: KagiRequest): string {
+  if (isAppTokenRequest(req)) {
+    const perms = Object.entries(req.permissions)
+      .map(([k, v]) => `${k}:${v}`)
+      .join(", ");
+    return `GitHub トークン発行 ${req.owner}/${
+      req.repositories.join(",")
+    } (${perms})`;
+  }
+  let host = req.url;
+  try {
+    host = new URL(req.url).host;
+  } catch { /* parseKagiRequest already checked; keep the raw text */ }
+  return `${methodOf(req)} ${host}`;
 }

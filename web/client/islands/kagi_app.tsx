@@ -36,13 +36,24 @@ import {
   readSubscription,
   type Subscription,
 } from "../lib/kagi/device.ts";
+import { appJwt, mintInstallationToken } from "../lib/kagi/github_app.ts";
 import {
+  type GithubAppTokenRequest,
+  type HttpRequest,
+  isAppTokenRequest,
   isSecretName,
   methodOf,
   type Transaction,
   type TxStatus,
 } from "../lib/kagi/protocol.ts";
-import { execute, hostOf, secretsProblem } from "../lib/kagi/substitute.ts";
+import {
+  execute,
+  type GithubAppSecret,
+  hostOf,
+  isAppSecret,
+  type SecretEntry,
+  secretsProblem,
+} from "../lib/kagi/substitute.ts";
 import {
   createVault,
   deleteVault,
@@ -100,6 +111,9 @@ export const KagiApp = clientEntry(
     let nameInput: HTMLInputElement | null = null;
     let valueInput: HTMLInputElement | null = null;
     let hostsInput: HTMLInputElement | null = null;
+    let appNameInput: HTMLInputElement | null = null;
+    let appIdInput: HTMLInputElement | null = null;
+    let appKeyInput: HTMLTextAreaElement | null = null;
 
     const setStatus = (message: string, kind: AlertKind = "info") => {
       status = { message, kind };
@@ -194,6 +208,39 @@ export const KagiApp = clientEntry(
         setStatus(`${name} を保存しました。`, "success");
       });
 
+    const onAddApp = () =>
+      run(async () => {
+        if (!unlocked) return;
+        const name = appNameInput?.value.trim() ?? "";
+        const appId = appIdInput?.value.trim() ?? "";
+        const pem = appKeyInput?.value.trim() ?? "";
+        if (!isSecretName(name)) {
+          throw new Error(
+            "名前は英字・数字・_ で、英字か _ で始めてください。",
+          );
+        }
+        if (!/^(?:\d+|Iv[0-9A-Za-z.]+)$/.test(appId)) {
+          throw new Error(
+            "App ID（数字）か Client ID（Iv…）を入力してください。",
+          );
+        }
+        // Fail here, not at the first approval, if the key cannot be used.
+        await appJwt({ kind: "github-app", appId, value: pem, hosts: [] });
+        const app: GithubAppSecret = {
+          kind: "github-app",
+          appId,
+          value: pem,
+          hosts: [],
+        };
+        const entries = { ...unlocked.entries, [name]: app };
+        await unlocked.save(entries);
+        unlocked.entries = entries;
+        if (appNameInput) appNameInput.value = "";
+        if (appIdInput) appIdInput.value = "";
+        if (appKeyInput) appKeyInput.value = "";
+        setStatus(`GitHub App ${name} を保存しました。`, "success");
+      });
+
     const onRemoveSecret = (name: string) =>
       run(async () => {
         if (!unlocked || !confirm(`${name} を削除しますか？`)) return;
@@ -248,12 +295,32 @@ export const KagiApp = clientEntry(
         const vault = await unlockVault();
         const problem = secretsProblem(tx.request, vault.entries);
         if (problem) throw new Error(problem);
+
+        if (isAppTokenRequest(tx.request)) {
+          const app = vault.entries[tx.request.app] as GithubAppSecret;
+          conn.decide(tx.id, true);
+          try {
+            const result = await mintInstallationToken(tx.request, app);
+            conn.complete(tx.id, result);
+            setStatus(
+              "トークンを発行しました（1 時間有効）。リクエスト元が受け取るまでこの画面に保持されます。",
+              "success",
+            );
+          } catch (e) {
+            const message = errorText(e, "トークンを発行できませんでした");
+            conn.fail(tx.id, message);
+            throw new Error(message);
+          }
+          return;
+        }
+
+        const request = tx.request;
         const secrets = Object.fromEntries(
-          tx.request.secrets.map((name) => [name, vault.entries[name].value]),
+          request.secrets.map((name) => [name, vault.entries[name].value]),
         );
         conn.decide(tx.id, true);
         try {
-          const result = await execute(tx.request, secrets);
+          const result = await execute(request, secrets);
           conn.complete(tx.id, result);
           setStatus(
             `実行しました (HTTP ${result.status})。結果はリクエスト元が受け取るまでこの画面に保持されます。`,
@@ -322,11 +389,7 @@ export const KagiApp = clientEntry(
               {Object.entries(unlocked.entries).map(([name, entry]) => (
                 <li mix={[itemStyle, secretRowStyle]} key={name}>
                   <code>[{name}]</code>
-                  <span mix={mutedStyle}>
-                    {entry.hosts.length
-                      ? ` → ${entry.hosts.join(", ")} のみ`
-                      : " → 送信先の制限なし"}
-                  </span>
+                  <span mix={mutedStyle}>{describeSecret(entry)}</span>
                   <button
                     type="button"
                     mix={[
@@ -390,6 +453,56 @@ export const KagiApp = clientEntry(
                 mix={[actionStyle, on("click", onCreateVault)]}
               >
                 パスキーを作り直す
+              </button>
+            </div>
+
+            <h3>GitHub App を追加</h3>
+            <p mix={mutedStyle}>
+              App の秘密鍵はこの端末から出ません。リクエスト元には、指定された
+              リポジトリと権限だけに絞った 1 時間有効のトークンを、承認のたびに
+              発行して渡します。
+            </p>
+            <div mix={formStyle}>
+              <input
+                placeholder="名前 (例: GH_APP)"
+                aria-label="GitHub App の名前"
+                autocomplete="off"
+                autocapitalize="characters"
+                mix={[
+                  inputStyle,
+                  ref((n) => (appNameInput = n as HTMLInputElement)),
+                ]}
+              />
+              <input
+                placeholder="App ID または Client ID"
+                aria-label="GitHub App ID"
+                autocomplete="off"
+                autocapitalize="none"
+                mix={[
+                  inputStyle,
+                  ref((n) => (appIdInput = n as HTMLInputElement)),
+                ]}
+              />
+              <textarea
+                placeholder="-----BEGIN RSA PRIVATE KEY----- …（ダウンロードした .pem の中身）"
+                aria-label="GitHub App の秘密鍵"
+                autocomplete="off"
+                autocapitalize="none"
+                spellcheck={false}
+                rows={4}
+                mix={[
+                  inputStyle,
+                  ref((n) => (appKeyInput = n as HTMLTextAreaElement)),
+                ]}
+              />
+            </div>
+            <div mix={rowStyle}>
+              <button
+                type="button"
+                disabled={busy}
+                mix={[actionStyle, primaryStyle, on("click", onAddApp)]}
+              >
+                GitHub App を保存
               </button>
             </div>
           </div>
@@ -473,49 +586,29 @@ export const KagiApp = clientEntry(
                 key={tx.id}
                 mix={[itemStyle, tx.id === focusTx ? focusStyle : null]}
               >
-                <div mix={rowStyle}>
-                  <strong>{methodOf(tx.request)}</strong>
-                  <strong mix={hostStyle}>{safeHost(tx)}</strong>
-                  <span mix={badgeStyle} data-status={tx.status}>
-                    {STATUS_LABEL[tx.status]}
-                  </span>
-                </div>
+                {isAppTokenRequest(tx.request)
+                  ? (
+                    <div mix={rowStyle}>
+                      <strong>GitHub トークン発行</strong>
+                      <strong mix={hostStyle}>{tx.request.owner}</strong>
+                      <span mix={badgeStyle} data-status={tx.status}>
+                        {STATUS_LABEL[tx.status]}
+                      </span>
+                    </div>
+                  )
+                  : (
+                    <div mix={rowStyle}>
+                      <strong>{methodOf(tx.request)}</strong>
+                      <strong mix={hostStyle}>{safeHost(tx.request)}</strong>
+                      <span mix={badgeStyle} data-status={tx.status}>
+                        {STATUS_LABEL[tx.status]}
+                      </span>
+                    </div>
+                  )}
                 <dl mix={detailsStyle}>
-                  <dt>URL</dt>
-                  <dd>
-                    <code>{tx.request.url}</code>
-                  </dd>
-                  <dt>使う秘密</dt>
-                  <dd>
-                    {tx.request.secrets.length
-                      ? tx.request.secrets.map((s) => <code key={s}>[{s}]
-                      </code>)
-                      : "なし"}
-                  </dd>
-                  {tx.request.headers && (
-                    <>
-                      <dt>ヘッダー</dt>
-                      <dd>
-                        <pre mix={codeStyle}>
-                          {Object.entries(tx.request.headers)
-                            .map(([k, v]) => `${k}: ${v}`)
-                            .join("\n")}
-                        </pre>
-                      </dd>
-                    </>
-                  )}
-                  {tx.request.body !== undefined && (
-                    <>
-                      <dt>ボディ</dt>
-                      <dd>
-                        <pre mix={codeStyle}>
-                          {typeof tx.request.body === "string"
-                            ? tx.request.body
-                            : JSON.stringify(tx.request.body, null, 2)}
-                        </pre>
-                      </dd>
-                    </>
-                  )}
+                  {isAppTokenRequest(tx.request)
+                    ? appTokenDetails(tx.request)
+                    : httpDetails(tx.request)}
                   <dt>受付</dt>
                   <dd>{new Date(tx.createdAt).toLocaleString()}</dd>
                   {tx.error && (
@@ -573,12 +666,90 @@ export const KagiApp = clientEntry(
   },
 );
 
-function safeHost(tx: Transaction): string {
+function safeHost(req: HttpRequest): string {
   try {
-    return hostOf(tx.request);
+    return hostOf(req);
   } catch {
-    return tx.request.url;
+    return req.url;
   }
+}
+
+function describeSecret(entry: SecretEntry): string {
+  if (isAppSecret(entry)) return ` → GitHub App (ID ${entry.appId})`;
+  return entry.hosts.length
+    ? ` → ${entry.hosts.join(", ")} のみ`
+    : " → 送信先の制限なし";
+}
+
+/** What a token request grants, spelled out: this is the whole of what the approver decides. */
+function appTokenDetails(req: GithubAppTokenRequest) {
+  return (
+    <>
+      <dt>リポジトリ</dt>
+      <dd>
+        {req.repositories.map((r) => (
+          <div key={r}>
+            <code>{req.owner}/{r}</code>
+          </div>
+        ))}
+      </dd>
+      <dt>権限</dt>
+      <dd>
+        {Object.entries(req.permissions).map(([name, level]) => (
+          <div key={name}>
+            <code>{name}</code>: <strong>{level}</strong>
+          </div>
+        ))}
+      </dd>
+      <dt>有効期限</dt>
+      <dd>1 時間</dd>
+      <dt>使う App</dt>
+      <dd>
+        <code>[{req.app}]</code>
+      </dd>
+    </>
+  );
+}
+
+function httpDetails(req: HttpRequest) {
+  return (
+    <>
+      <dt>URL</dt>
+      <dd>
+        <code>{req.url}</code>
+      </dd>
+      <dt>使う秘密</dt>
+      <dd>
+        {req.secrets.length
+          ? req.secrets.map((s) => <code key={s}>[{s}]</code>)
+          : "なし"}
+      </dd>
+      {req.headers && (
+        <>
+          <dt>ヘッダー</dt>
+          <dd>
+            <pre mix={codeStyle}>
+              {Object.entries(req.headers)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join("\n")}
+            </pre>
+          </dd>
+        </>
+      )}
+      {req.body !== undefined && (
+        <>
+          <dt>ボディ</dt>
+          <dd>
+            <pre mix={codeStyle}>
+              {typeof req.body === "string"
+                ? req.body
+                : JSON.stringify(req.body, null, 2)}
+            </pre>
+          </dd>
+        </>
+      )}
+    </>
+  );
 }
 
 function usage(endpoint: (path: string) => string, id: string): string {

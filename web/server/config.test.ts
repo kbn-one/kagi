@@ -13,15 +13,11 @@ Deno.test("loadConfig: env の値をそのまま反映する", () => {
     IDP_ORIGIN: "http://localhost:8000",
     RP_ORIGIN: "https://rp.example.com",
     RP_SIGNING_KEY_JWK: "{}",
-    TURSO_DATABASE_URL: "libsql://db.turso.io",
-    TURSO_AUTH_TOKEN: "token",
   });
   assertEquals(config, {
     idpOrigin: "http://localhost:8000",
     rpOrigin: "https://rp.example.com",
     rpSigningKeyJwk: "{}",
-    tursoDatabaseUrl: "libsql://db.turso.io",
-    tursoAuthToken: "token",
   });
 });
 
@@ -30,6 +26,4 @@ Deno.test("loadConfig: 空の env はデフォルトにフォールバックす�
   assertEquals(config.idpOrigin, "https://id.kbn.one");
   assertEquals(config.rpOrigin, "");
   assertEquals(config.rpSigningKeyJwk, "");
-  assertEquals(config.tursoDatabaseUrl, "");
-  assertEquals(config.tursoAuthToken, "");
 });

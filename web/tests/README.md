@@ -21,7 +21,7 @@ deno task test:browser    # root から
 
 ## カバー範囲
 
-- `browser_hydration.test.ts` — `/hydration` を開き、`globalThis.__rmxReady`
-  が立つまで待ってから `button[aria-label="increment"]` をクリックし、`<output>`
-  の数値が +1 される事を assert する。SSR → chunk の動的 import →
-  `handle.update()` のフル経路を exercise する。
+- `kagi_browser.test.ts` — `/kagi` を開き、`globalThis.__rmxReady`
+  が立つまで待ってから「パスキーを作成」をクリックし、island の alert
+  が出ることを assert する（lightpanda に WebAuthn は無いので、エラー表示が出る
+  ＝ hydrate されたクリックハンドラーが動いた）。

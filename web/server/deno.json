@@ -6,7 +6,10 @@
     "build:worker": "deno bundle --platform=browser --external=cloudflare:workers -o ../worker-dist/worker.js worker.ts",
     "build:cf": {
       "description": "Static site + Worker bundle, arranged as the Build Output for `cf deploy --prebuilt`",
-      "dependencies": ["build", "build:worker"],
+      "dependencies": [
+        "build",
+        "build:worker"
+      ],
       "command": "deno run -A cf_build.ts"
     },
     "check": "deno check ."
@@ -20,17 +23,13 @@
         "../dist"
       ],
       "env": {
-        "allow": [
-          "BASE_URL"
-        ],
+        "allow": [],
         "ignore": [
           "NODE_ENV",
           "VSCODE_TEXTMATE_DEBUG",
           "IDP_ORIGIN",
           "RP_ORIGIN",
-          "RP_SIGNING_KEY_JWK",
-          "TURSO_DATABASE_URL",
-          "TURSO_AUTH_TOKEN"
+          "RP_SIGNING_KEY_JWK"
         ]
       },
       "import": true
@@ -44,12 +43,9 @@
           "PORT",
           "IDP_ORIGIN",
           "RP_ORIGIN",
-          "RP_SIGNING_KEY_JWK",
-          "TURSO_DATABASE_URL",
-          "TURSO_AUTH_TOKEN"
+          "RP_SIGNING_KEY_JWK"
         ],
         "ignore": [
-          "BASE_URL",
           "NODE_ENV",
           "VSCODE_TEXTMATE_DEBUG"
         ]

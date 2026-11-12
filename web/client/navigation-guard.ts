@@ -1,18 +1,18 @@
 /**
  * The two navigations the runtime should not be handling, handed back to the browser.
  *
- * Calling `run()` — either one, `@remix-run/component`'s or `@remix-run/spa`'s — starts a Navigation API
+ * Calling `@remix-run/component`'s `run()` starts a Navigation API
  * listener that intercepts every same-origin navigation it can. Two of those are not navigations
  * at all in the sense the runtime means, and intercepting them is a regression rather than an
  * enhancement:
  *
  * - **A jump to a `#fragment` on the page you are already on.** The browser moves the scroll
  *   position and nothing else. Intercepted, it becomes a fetch of the whole page and a full
- *   reconciliation of the DOM — measurably so: one click on a chip in the UI showcase pulled the
- *   document again and re-hydrated eighteen islands to do what the browser does for free.
+ *   reconciliation of the DOM — measurably so: the page is fetched again and every island
+ *   re-hydrated to do what the browser does for free.
  * - **A reload.** F5, the toolbar button, `location.reload()`. Intercepted, it reconciles the new
  *   HTML into the document that is already open, which is very nearly a reload except for the part
- *   people reload *for*: component state survives it. A counter at 3 is still at 3 afterwards.
+ *   people reload *for*: component state survives it.
  *
  * Remix's own documentation site ships this same guard in its browser entry, with a comment saying
  * to remove it once `@remix-run/component` ignores these itself, so this is a workaround with an expiry date

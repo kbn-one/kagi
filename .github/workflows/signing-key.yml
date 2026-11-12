@@ -1,0 +1,32 @@
+# Generates the RP's ES256 signing key and stores it as the Worker secret RP_SIGNING_KEY_JWK
+# (web/server/set_signing_key.ts). The private key never reaches the log; the run prints only its
+# kid, which /.well-known/jwks.json shows once the Worker serves it.
+#
+# Run it once after the first deploy, from Actions → signing-key → Run workflow. Re-running refuses
+# to replace an existing key unless `rotate` is checked.
+name: signing-key
+
+on:
+  workflow_dispatch:
+    inputs:
+      rotate:
+        description: Replace the existing key
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  set:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno task set-signing-key ${{ inputs.rotate && '--rotate' || '' }}
+        timeout-minutes: 3
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

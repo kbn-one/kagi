@@ -208,6 +208,31 @@ export const KagiApp = clientEntry(
         setStatus(`${name} を保存しました。`, "success");
       });
 
+    /** Reads a picked .pem into the key field; nothing leaves the phone until it is sealed. */
+    const onPickKeyFile = async (input: HTMLInputElement) => {
+      const file = input.files?.[0];
+      input.value = "";
+      if (!file) return;
+      try {
+        if (file.size > 16 * 1024) {
+          throw new Error("秘密鍵のファイルにしては大きすぎます。");
+        }
+        const text = (await file.text()).trim();
+        if (!/-----BEGIN (RSA )?PRIVATE KEY-----/.test(text)) {
+          throw new Error(
+            "秘密鍵（BEGIN … PRIVATE KEY）のファイルではありません。",
+          );
+        }
+        if (appKeyInput) appKeyInput.value = text;
+        setStatus(
+          `${file.name} を読み込みました。「GitHub App を保存」で暗号化して保存したら、ダウンロードした .pem は削除してください。`,
+          "info",
+        );
+      } catch (e) {
+        setStatus(errorText(e, "ファイルを読み込めませんでした。"), "error");
+      }
+    };
+
     const onAddApp = () =>
       run(async () => {
         if (!unlocked) return;
@@ -238,7 +263,10 @@ export const KagiApp = clientEntry(
         if (appNameInput) appNameInput.value = "";
         if (appIdInput) appIdInput.value = "";
         if (appKeyInput) appKeyInput.value = "";
-        setStatus(`GitHub App ${name} を保存しました。`, "success");
+        setStatus(
+          `GitHub App ${name} を保存しました。ダウンロードした .pem は削除してください。`,
+          "success",
+        );
       });
 
     const onRemoveSecret = (name: string) =>
@@ -483,8 +511,18 @@ export const KagiApp = clientEntry(
                   ref((n) => (appIdInput = n as HTMLInputElement)),
                 ]}
               />
+              <label mix={fileLabelStyle}>
+                <span>秘密鍵ファイル（.pem）を選ぶ</span>
+                <input
+                  type="file"
+                  aria-label="GitHub App の秘密鍵ファイル"
+                  mix={on("change", (event) => {
+                    void onPickKeyFile(event.currentTarget as HTMLInputElement);
+                  })}
+                />
+              </label>
               <textarea
-                placeholder="-----BEGIN RSA PRIVATE KEY----- …（ダウンロードした .pem の中身）"
+                placeholder="または .pem の中身（-----BEGIN RSA PRIVATE KEY----- から END まで）を貼り付け"
                 aria-label="GitHub App の秘密鍵"
                 autocomplete="off"
                 autocapitalize="none"
@@ -865,6 +903,14 @@ const inputStyle = css({
   background: color.bg,
   color: color.fg,
   font: "inherit",
+});
+
+const fileLabelStyle = css({
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.3rem",
+  fontSize: "0.9rem",
+  "& input": { font: "inherit" },
 });
 
 const rowStyle = css({

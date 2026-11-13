@@ -141,24 +141,88 @@ export default function Docs(_handle: Handle) {
           のトークンを、承認付きで発行する。制限は GitHub
           が強制するので、関係ないリポジトリへは push できない。
         </p>
-        <h3>GitHub 側</h3>
+        <h3>GitHub 側: App を作る</h3>
+        <p>
+          スマホでやるのが一番安全（秘密鍵をほかの端末から移さずに済む）。
+        </p>
         <ol mix={listStyle}>
           <li>
-            Settings → Developer settings → GitHub Apps で App を作る。
-            Repository permissions の <strong>Contents</strong> を{" "}
-            <strong>Read and write</strong>{" "}
-            にする（発行するトークンはこれを超えられない）。Webhook は不要。
+            GitHub の{" "}
+            <strong>Settings → Developer settings → GitHub Apps</strong> で{" "}
+            <strong>New GitHub App</strong>{" "}
+            を押す。組織のリポジトリなら組織の Settings から作る。
           </li>
-          <li>push させてよいリポジトリに App をインストールする。</li>
-          <li>秘密鍵（.pem）を生成し、App ID を控える。</li>
+          <li>
+            名前と Homepage URL（<code>{ORIGIN}</code> でよい）を入れ、
+            <strong>Webhook</strong> の <strong>Active</strong>{" "}
+            のチェックを外す。
+          </li>
+          <li>
+            <strong>Repository permissions</strong> の <strong>Contents</strong>
+            {" "}
+            を <strong>Read and write</strong>{" "}
+            にする。発行するトークンはこの範囲を超えられないので、必要な分だけにする
+            （Metadata: Read-only は自動で付く）。
+          </li>
+          <li>
+            「Where can this GitHub App be installed?」は{" "}
+            <strong>Only on this account</strong> にして作成する。
+          </li>
+          <li>
+            左メニューの <strong>Install App</strong>{" "}
+            から、push させてよいリポジトリにインストールする（Only select
+            repositories で選ぶ）。
+          </li>
         </ol>
-        <h3>スマホ側</h3>
+
+        <h3>GitHub 側: App ID と秘密鍵</h3>
+        <ol mix={listStyle}>
+          <li>
+            App の設定（<strong>Edit</strong>）の <strong>General</strong>{" "}
+            ページ上部にある <strong>App ID</strong>（数字）を控える。
+          </li>
+          <li>
+            同じページを下までスクロールし、<strong>Private keys</strong> 欄の
+            {" "}
+            <strong>Generate a private key</strong> を押す。ブラウザーが
+            <code>アプリ名.日付.private-key.pem</code>{" "}
+            をダウンロードする。これが秘密鍵。
+          </li>
+          <li>
+            GitHub
+            は公開鍵しか持たないので、ダウンロードできるのはこの一回だけ。
+            なくしたら同じボタンで作り直し、古い鍵は同じ欄の Delete で消す。
+          </li>
+        </ol>
+
+        <h3>スマホ側: kagi に入れる</h3>
+        <ol mix={listStyle}>
+          <li>
+            <a href={routes.kagi.href()}>承認</a>{" "}
+            の画面で「パスキーで開いて編集」を押す。
+          </li>
+          <li>
+            「GitHub App を追加」に名前（<code>GH_APP</code>）と App ID
+            を入れ、<strong>秘密鍵ファイル（.pem）を選ぶ</strong>{" "}
+            でダウンロードした .pem を選ぶ（中身を貼り付けてもよい）。
+          </li>
+          <li>
+            「GitHub App
+            を保存」を押す。鍵はパスキーで暗号化されて端末に置かれ、
+            外には出ない。
+          </li>
+          <li>
+            <strong>保存したら、ダウンロードした .pem は削除する</strong>
+            （iPhone はファイル App の「ダウンロード」、Android は Files
+            の「Download」にある）。
+          </li>
+        </ol>
         <p>
-          <a href={routes.kagi.href()}>承認</a>{" "}
-          の画面で「パスキーで開いて編集」→「GitHub App を追加」に、名前（
-          <code>GH_APP</code>）・App ID・.pem
-          の中身を入れて保存する。鍵は端末から出ない。
+          PC で鍵を作った場合は、メールやチャットで送らないこと（それ自体が
+          漏えいになる）。AirDrop など端末どうしで直接渡すか、スマホで鍵を
+          作り直す。
         </p>
+
         <h3>エージェント側</h3>
         <p>
           git の credential helper を設定する。git が push 先の{" "}

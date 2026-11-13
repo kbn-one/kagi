@@ -14,6 +14,11 @@
  *     '!KAGI_URL=https://kagi.kbn.one/api/sub/<id> deno run --allow-net=kagi.kbn.one --allow-env \
  *       https://raw.githubusercontent.com/kbn-one/kagi/main/tools/git_credential_kagi.ts'
  *
+ * It also creates repositories, as its own command (the approver sees the name and visibility):
+ *
+ *   KAGI_URL=… deno run --allow-net=kagi.kbn.one --allow-env …/git_credential_kagi.ts \
+ *     create kbn-one/new-repo --public [--description "…"] [--init]
+ *
  * Environment: `KAGI_URL` (required), `KAGI_APP` (vault name of the App, default `GH_APP`),
  * `KAGI_PERMISSIONS` (default `contents:write`, comma-separated `name:read|write`).
  *
@@ -83,19 +88,40 @@ export async function run(
     return "";
   }
 
+  const result = await askKagi(
+    env,
+    {
+      type: "github-app-token",
+      app: env.KAGI_APP || "GH_APP",
+      owner,
+      repositories: [repo],
+      permissions: parsePermissions(env.KAGI_PERMISSIONS || "contents:write"),
+    },
+    `${owner}/${repo} への push`,
+    log,
+    fetchImpl,
+  );
+  const { token } = JSON.parse(result.body) as { token?: string };
+  if (!token) throw new Error("kagi: トークンが返ってきませんでした");
+  log(`kagi: 承認されました（${owner}/${repo} のみ、1 時間有効）`);
+  return `username=x-access-token\npassword=${token}\n`;
+}
+
+/** Submits a request to kagi and waits for the approver. Returns the call's result. */
+async function askKagi(
+  env: HelperEnv,
+  request: Record<string, unknown>,
+  what: string,
+  log: (message: string) => void,
+  fetchImpl: typeof fetch,
+): Promise<{ status: number; body: string }> {
   const base = env.KAGI_URL?.replace(/\/+$/, "").replace(/\/req$/, "");
   if (!base) throw new Error("KAGI_URL が設定されていません");
 
   const submitted = await fetchImpl(`${base}/req`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      type: "github-app-token",
-      app: env.KAGI_APP || "GH_APP",
-      owner,
-      repositories: [repo],
-      permissions: parsePermissions(env.KAGI_PERMISSIONS || "contents:write"),
-    }),
+    body: JSON.stringify(request),
   });
   if (submitted.status !== 202) {
     throw new Error(`kagi: ${await problemDetail(submitted)}`);
@@ -103,7 +129,7 @@ export async function run(
   const { transaction_id } = await submitted.json() as {
     transaction_id: string;
   };
-  log(`kagi: ${owner}/${repo} への push をスマホで承認してください…`);
+  log(`kagi: ${what}をスマホで承認してください…`);
 
   while (true) {
     const res = await fetchImpl(
@@ -119,21 +145,82 @@ export async function run(
     const { response } = await res.json() as {
       response: { status: number; body: string };
     };
-    const { token } = JSON.parse(response.body) as { token?: string };
-    if (!token) throw new Error("kagi: トークンが返ってきませんでした");
-    log(`kagi: 承認されました（${owner}/${repo} のみ、1 時間有効）`);
-    return `username=x-access-token\npassword=${token}\n`;
+    return response;
   }
 }
 
+const CREATE_USAGE =
+  "使い方: create <owner>/<name> --public|--private [--description <text>] [--init]";
+
+/**
+ * `create owner/name --public|--private [--description text] [--init]`: asks the approver to
+ * create a repository. Prints the new repository as JSON. Pushing to it is a separate approval.
+ */
+export async function create(
+  args: string[],
+  env: HelperEnv,
+  log: (message: string) => void = (m) => console.error(m),
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  let target: string | undefined;
+  let visibility: "public" | "private" | undefined;
+  let description: string | undefined;
+  let autoInit = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--public" || a === "--private") {
+      if (visibility) throw new Error(CREATE_USAGE);
+      visibility = a === "--public" ? "public" : "private";
+    } else if (a === "--description") {
+      description = args[++i];
+      if (description === undefined) throw new Error(CREATE_USAGE);
+    } else if (a === "--init") {
+      autoInit = true;
+    } else if (!a.startsWith("-") && target === undefined) {
+      target = a;
+    } else {
+      throw new Error(CREATE_USAGE);
+    }
+  }
+  const [owner, name, ...rest] = (target ?? "").split("/");
+  // Visibility is never defaulted: the requester states it and the approver sees it.
+  if (!owner || !name || rest.length || !visibility) {
+    throw new Error(CREATE_USAGE);
+  }
+
+  const result = await askKagi(
+    env,
+    {
+      type: "github-create-repo",
+      app: env.KAGI_APP || "GH_APP",
+      owner,
+      name,
+      visibility,
+      ...(description !== undefined ? { description } : {}),
+      ...(autoInit ? { autoInit } : {}),
+    },
+    `${owner}/${name}（${visibility}）の作成`,
+    log,
+    fetchImpl,
+  );
+  log(`kagi: ${owner}/${name} を作成しました`);
+  return `${result.body}\n`;
+}
+
 if (import.meta.main) {
-  const input = await new Response(Deno.stdin.readable).text();
+  const env: HelperEnv = {
+    KAGI_URL: Deno.env.get("KAGI_URL"),
+    KAGI_APP: Deno.env.get("KAGI_APP"),
+    KAGI_PERMISSIONS: Deno.env.get("KAGI_PERMISSIONS"),
+  };
   try {
-    const out = await run(Deno.args[0] ?? "", input, {
-      KAGI_URL: Deno.env.get("KAGI_URL"),
-      KAGI_APP: Deno.env.get("KAGI_APP"),
-      KAGI_PERMISSIONS: Deno.env.get("KAGI_PERMISSIONS"),
-    });
+    const out = Deno.args[0] === "create"
+      ? await create(Deno.args.slice(1), env)
+      : await run(
+        Deno.args[0] ?? "",
+        await new Response(Deno.stdin.readable).text(),
+        env,
+      );
     await Deno.stdout.write(new TextEncoder().encode(out));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));

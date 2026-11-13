@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
 
-import { run } from "./git_credential_kagi.ts";
+import { create, run } from "./git_credential_kagi.ts";
 import {
   challengeMessage,
   type ClientMessage,
@@ -152,4 +152,45 @@ Deno.test("without a repository path, or for another host, it gives git nothing"
     "",
   );
   assertEquals(await run("store", gitInput("a/b"), {}, () => {}, fail), "");
+});
+
+Deno.test("create asks for the repository with the visibility it was given", async () => {
+  const { fetchImpl, seen } = await setup(true);
+  const out = await create(
+    ["kbn-one/new-repo", "--public", "--description", "demo", "--init"],
+    { KAGI_URL: BASE },
+    () => {},
+    fetchImpl,
+  );
+  // The scripted phone answers every request with the same body.
+  assert(out.includes("ghs_one_repo"));
+  assertEquals(seen, [{
+    type: "github-create-repo",
+    app: "GH_APP",
+    owner: "kbn-one",
+    name: "new-repo",
+    visibility: "public",
+    description: "demo",
+    autoInit: true,
+  }]);
+});
+
+Deno.test("create needs an owner/name and an explicit visibility", async () => {
+  const fail = (() => {
+    throw new Error("must not call kagi");
+  }) as typeof fetch;
+  for (
+    const args of [
+      ["kbn-one/x"],
+      ["x", "--public"],
+      ["kbn-one/x", "--public", "--private"],
+      ["kbn-one/x", "--public", "--bogus"],
+    ]
+  ) {
+    await assertRejects(
+      () => create(args, { KAGI_URL: BASE }, () => {}, fail),
+      Error,
+      "使い方",
+    );
+  }
 });

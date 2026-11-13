@@ -17,7 +17,10 @@
  * What a requester asks for: an HTTP call made with secrets ({@link HttpRequest}), or a short-lived
  * GitHub token limited to named repositories ({@link GithubAppTokenRequest}).
  */
-export type KagiRequest = HttpRequest | GithubAppTokenRequest;
+export type KagiRequest =
+  | HttpRequest
+  | GithubAppTokenRequest
+  | GithubCreateRepoRequest;
 
 /** An API call for the approver to make. `[NAME]` in a string is replaced by secret NAME. */
 export interface HttpRequest {
@@ -49,13 +52,40 @@ export interface GithubAppTokenRequest {
   permissions: Record<string, "read" | "write">;
 }
 
+/**
+ * A new repository, created on the approver's phone with the App (vault secret `app`). The token
+ * that creates it never leaves the phone; the requester receives the new repository's names and
+ * URLs. Pushing to it is a separate {@link GithubAppTokenRequest}, approved on its own.
+ *
+ * The App needs the "Repository creation" (or "Administration") repository permission, and must be
+ * installed on `owner`.
+ */
+export interface GithubCreateRepoRequest {
+  type: "github-create-repo";
+  app: string;
+  owner: string;
+  name: string;
+  /** Stated, never defaulted: it is what the approver decides on. */
+  visibility: "public" | "private";
+  description?: string;
+  /** Create with an initial commit (README), so the default branch exists. */
+  autoInit?: boolean;
+}
+
 export const isAppTokenRequest = (
   req: KagiRequest,
 ): req is GithubAppTokenRequest => req.type === "github-app-token";
 
+export const isCreateRepoRequest = (
+  req: KagiRequest,
+): req is GithubCreateRepoRequest => req.type === "github-create-repo";
+
+export const isHttpRequest = (req: KagiRequest): req is HttpRequest =>
+  req.type === undefined || req.type === "http";
+
 /** The vault secrets a request uses. */
 export const secretNamesOf = (req: KagiRequest): string[] =>
-  isAppTokenRequest(req) ? [req.app] : req.secrets;
+  isHttpRequest(req) ? req.secrets : [req.app];
 
 /** The approver's call, as the requester receives it. Secret values are scrubbed from it. */
 export interface KagiResult {
@@ -163,8 +193,9 @@ export function parseKagiRequest(value: unknown): KagiRequest | string {
   }
   const v = value as Record<string, unknown>;
   if (v.type === "github-app-token") return parseAppTokenRequest(v);
+  if (v.type === "github-create-repo") return parseCreateRepoRequest(v);
   if (v.type !== undefined && v.type !== "http") {
-    return 'type must be "http" or "github-app-token"';
+    return 'type must be "http", "github-app-token" or "github-create-repo"';
   }
 
   if (
@@ -291,8 +322,54 @@ function parseAppTokenRequest(
   };
 }
 
+export const MAX_DESCRIPTION_LENGTH = 350;
+
+function parseCreateRepoRequest(
+  v: Record<string, unknown>,
+): GithubCreateRepoRequest | string {
+  if (typeof v.app !== "string" || !isSecretName(v.app)) {
+    return "app must be a secret name";
+  }
+  if (typeof v.owner !== "string" || !GITHUB_OWNER.test(v.owner)) {
+    return "owner must be a GitHub user or organization name";
+  }
+  if (
+    typeof v.name !== "string" || !GITHUB_REPO.test(v.name) ||
+    v.name === "." || v.name === ".."
+  ) {
+    return "name must be a repository name (without the owner)";
+  }
+  if (v.visibility !== "public" && v.visibility !== "private") {
+    return 'visibility must be "public" or "private"';
+  }
+  const req: GithubCreateRepoRequest = {
+    type: "github-create-repo",
+    app: v.app,
+    owner: v.owner,
+    name: v.name,
+    visibility: v.visibility,
+  };
+  if (v.description !== undefined) {
+    if (
+      typeof v.description !== "string" ||
+      v.description.length > MAX_DESCRIPTION_LENGTH
+    ) {
+      return `description must be a string of at most ${MAX_DESCRIPTION_LENGTH} characters`;
+    }
+    req.description = v.description;
+  }
+  if (v.autoInit !== undefined) {
+    if (typeof v.autoInit !== "boolean") return "autoInit must be a boolean";
+    req.autoInit = v.autoInit;
+  }
+  return req;
+}
+
 /** A one-line summary of a request, for the notification and the approval list. */
 export function summarize(req: KagiRequest): string {
+  if (isCreateRepoRequest(req)) {
+    return `GitHub リポジトリ作成 ${req.owner}/${req.name} (${req.visibility})`;
+  }
   if (isAppTokenRequest(req)) {
     const perms = Object.entries(req.permissions)
       .map(([k, v]) => `${k}:${v}`)

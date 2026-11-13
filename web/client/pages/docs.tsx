@@ -25,6 +25,7 @@ export default function Docs(_handle: Handle) {
         <a href="#approver">承認者の準備</a>
         <a href="#request">リクエストを送る</a>
         <a href="#git">git push を 1 リポジトリに絞る</a>
+        <a href="#create">リポジトリを作る</a>
         <a href="#limits">できること・できないこと</a>
       </nav>
 
@@ -266,8 +267,68 @@ git config --global credential.https://github.com.helper \\
         </p>
       </section>
 
+      <section mix={cardStyle} id="create">
+        <h2>4. リポジトリを作る（GitHub App）</h2>
+        <p>
+          エージェントが新しいリポジトリを作りたいときも、kagi
+          で承認してから作る。作成はスマホが行い、作成に使うトークンはスマホの外に出ない。
+          エージェントが受け取るのは、できたリポジトリの名前と URL だけ。
+        </p>
+        <ol mix={listStyle}>
+          <li>
+            GitHub App の Repository permissions で{" "}
+            <strong>Repository creation</strong> を{" "}
+            <strong>Read and write</strong>{" "}
+            にする（権限を足すと、インストール先のアカウントで承認を求められる
+            ことがある）。
+          </li>
+          <li>
+            エージェント側で、credential helper と同じファイルを{" "}
+            <code>create</code> で実行する。公開範囲（
+            <code>--public</code> か <code>--private</code>）は必ず指定する。
+            <pre
+              mix={preStyle}
+            >{`KAGI_URL=${SUB} deno run --allow-net=kagi.kbn.one --allow-env \
+  ${HELPER_URL} \
+  create kbn-one/new-repo --public --description "…" --init`}</pre>
+          </li>
+          <li>
+            スマホに「GitHub リポジトリ作成 kbn-one/new-repo (public)」と届く。
+            名前・公開範囲・説明を確かめてパスキーで承認すると、作成される。
+            <code>--init</code> を付けると README の初期コミット付きで作る。
+          </li>
+          <li>
+            作ったリポジトリへの push は、これまでどおり push
+            のたびに別の承認になる（そのリポジトリだけ・
+            <code>contents: write</code>・1 時間のトークン）。
+          </li>
+        </ol>
+        <p>リクエストを直接送る場合:</p>
+        <pre mix={preStyle}>{`curl -X POST ${SUB}/req \
+  -H 'content-type: application/json' \
+  -d '{
+    "type": "github-create-repo",
+    "app": "GH_APP",
+    "owner": "kbn-one",
+    "name": "new-repo",
+    "visibility": "public",
+    "description": "…",
+    "autoInit": true
+  }'`}</pre>
+        <p>
+          <code>visibility</code>（<code>public</code> /{" "}
+          <code>private</code>）は省略できない。結果の <code>body</code> は{" "}
+          <code>
+            {`{ full_name, html_url, clone_url, visibility, default_branch }`}
+          </code>
+          。App を「選んだリポジトリだけ」にインストールしている場合、
+          作ったリポジトリへの push で「インストールされていません」と出たら、
+          App のインストール設定でそのリポジトリを追加する。
+        </p>
+      </section>
+
       <section mix={cardStyle} id="limits">
-        <h2>4. できること・できないこと</h2>
+        <h2>5. できること・できないこと</h2>
         <ul mix={listStyle}>
           <li>
             秘密はスマホの外に出ない。サーバーもリクエスト元も秘密を見ない。

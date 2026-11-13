@@ -118,6 +118,8 @@ Deno.test("GET /docs explains setup, requests and the git credential helper", as
   assertStringIncludes(html, "credential.https://github.com.useHttpPath");
   assertStringIncludes(html, "tools/git_credential_kagi.ts");
   assertStringIncludes(html, "Generate a private key");
+  assertStringIncludes(html, "github-create-repo");
+  assertStringIncludes(html, "Repository creation");
   // Reachable from every page, so the static build writes it.
   const home = await (await router.fetch(new Request("http://x/"))).text();
   assertStringIncludes(home, 'href="/docs"');

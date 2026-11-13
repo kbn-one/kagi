@@ -81,6 +81,22 @@ API はスマホのブラウザーから呼ぶので、呼び先が CORS でこ�
 `repositories` と `permissions` は空にできない（GitHub は空を「全部」と解釈する
 ため）。App の鍵は通常の HTTP リクエストの `[NAME]` には埋め込めない。
 
+### リポジトリを作る
+
+App に Repository permissions の **Repository creation: Read and write**
+を足し、 エージェント側で同じファイルを `create` で実行する（公開範囲は必須）:
+
+```bash
+KAGI_URL=https://kagi.kbn.one/api/sub/<id> deno run --allow-net=kagi.kbn.one --allow-env \
+  https://raw.githubusercontent.com/kbn-one/kagi/main/tools/git_credential_kagi.ts \
+  create kbn-one/new-repo --public --description "…" --init
+```
+
+スマホに名前と公開範囲が表示され、承認するとスマホがリポジトリを作る。作成に使う
+トークンはスマホの外に出ず、エージェントには新しいリポジトリの名前と URL だけが
+返る。そこへの push は別の承認（`github-create-repo` リクエストの形は
+`/docs`）。
+
 開発のルールは [CLAUDE.md](./CLAUDE.md)。
 
 ref: https://github.com/remix-run/remix

@@ -12,7 +12,11 @@
  * code into a repository nobody approved.
  */
 
-import type { GithubAppTokenRequest, KagiResult } from "./protocol.ts";
+import type {
+  GithubAppTokenRequest,
+  GithubCreateRepoRequest,
+  KagiResult,
+} from "./protocol.ts";
 import type { GithubAppSecret } from "./substitute.ts";
 
 const API = "https://api.github.com";
@@ -177,4 +181,131 @@ export async function mintInstallationToken(
     headers: { "content-type": "application/json" },
     body,
   };
+}
+
+/** The App's installation on an account, and whether that account is an organization. */
+async function findAccountInstallation(
+  owner: string,
+  headers: Record<string, string>,
+  fetchImpl: typeof fetch,
+): Promise<{ id: number; organization: boolean }> {
+  const name = encodeURIComponent(owner);
+  for (
+    const path of [`/orgs/${name}/installation`, `/users/${name}/installation`]
+  ) {
+    const res = await fetchImpl(`${API}${path}`, { headers });
+    if (res.ok) {
+      const body = (await res.json()) as {
+        id: number;
+        account?: { type?: string };
+      };
+      return {
+        id: body.id,
+        organization: body.account?.type === "Organization",
+      };
+    }
+    await res.body?.cancel();
+    if (res.status !== 404) {
+      throw new Error(
+        `GitHub App のインストールを確認できませんでした: HTTP ${res.status}`,
+      );
+    }
+  }
+  throw new Error(`GitHub App が ${owner} にインストールされていません`);
+}
+
+/**
+ * Creates the repository the request names, as the App.
+ *
+ * The installation token used here is minted for this one call and never leaves the phone — it is
+ * not handed to the requester and is revoked straight after — so it is not narrowed to repositories
+ * or permissions: the creation endpoints accept "Repository creation" or "Administration", and
+ * leaving the permissions to the App's own spares guessing which one the App was given. The
+ * requester receives only the new repository's names and URLs.
+ */
+export async function createRepository(
+  req: GithubCreateRepoRequest,
+  app: GithubAppSecret,
+  fetchImpl: typeof fetch = fetch,
+): Promise<KagiResult> {
+  const jwt = await appJwt(app);
+  const appHeaders = {
+    authorization: `Bearer ${jwt}`,
+    accept: "application/vnd.github+json",
+  };
+  const installation = await findAccountInstallation(
+    req.owner,
+    appHeaders,
+    fetchImpl,
+  );
+
+  const minted = await fetchImpl(
+    `${API}/app/installations/${installation.id}/access_tokens`,
+    { method: "POST", headers: appHeaders, redirect: "error" },
+  );
+  if (!minted.ok) {
+    throw await githubError(minted, "作成用のトークンを発行できませんでした");
+  }
+  const { token } = (await minted.json()) as { token: string };
+  const headers = {
+    authorization: `Bearer ${token}`,
+    accept: "application/vnd.github+json",
+  };
+
+  try {
+    const url = installation.organization
+      ? `${API}/orgs/${encodeURIComponent(req.owner)}/repos`
+      : `${API}/user/repos`;
+    const res = await fetchImpl(url, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        name: req.name,
+        private: req.visibility === "private",
+        ...(req.description !== undefined
+          ? { description: req.description }
+          : {}),
+        ...(req.autoInit ? { auto_init: true } : {}),
+      }),
+      redirect: "error",
+    });
+    if (!res.ok) {
+      throw await githubError(
+        res,
+        `${req.owner}/${req.name} を作成できませんでした`,
+      );
+    }
+    const repo = (await res.json()) as {
+      full_name: string;
+      html_url: string;
+      clone_url: string;
+      private: boolean;
+      visibility?: string;
+      default_branch?: string;
+    };
+    if (
+      repo.full_name.toLowerCase() !== `${req.owner}/${req.name}`.toLowerCase()
+    ) {
+      throw new Error(
+        `GitHub が別のリポジトリ（${repo.full_name}）を作成しました。確認してください。`,
+      );
+    }
+    return {
+      status: res.status,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        full_name: repo.full_name,
+        html_url: repo.html_url,
+        clone_url: repo.clone_url,
+        visibility: repo.visibility ?? (repo.private ? "private" : "public"),
+        default_branch: repo.default_branch,
+      }),
+    };
+  } finally {
+    // The token did its one job; do not leave it valid for the rest of its hour.
+    await fetchImpl(`${API}/installation/token`, {
+      method: "DELETE",
+      headers,
+    }).then((r) => r.body?.cancel(), () => {});
+  }
 }

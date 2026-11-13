@@ -36,12 +36,20 @@ import {
   readSubscription,
   type Subscription,
 } from "../lib/kagi/device.ts";
-import { appJwt, mintInstallationToken } from "../lib/kagi/github_app.ts";
+import {
+  appJwt,
+  createRepository,
+  mintInstallationToken,
+} from "../lib/kagi/github_app.ts";
 import {
   type GithubAppTokenRequest,
+  type GithubCreateRepoRequest,
   type HttpRequest,
   isAppTokenRequest,
+  isCreateRepoRequest,
+  isHttpRequest,
   isSecretName,
+  type KagiRequest,
   methodOf,
   type Transaction,
   type TxStatus,
@@ -342,6 +350,24 @@ export const KagiApp = clientEntry(
           return;
         }
 
+        if (isCreateRepoRequest(tx.request)) {
+          const app = vault.entries[tx.request.app] as GithubAppSecret;
+          conn.decide(tx.id, true);
+          try {
+            const result = await createRepository(tx.request, app);
+            conn.complete(tx.id, result);
+            setStatus(
+              `${tx.request.owner}/${tx.request.name} を作成しました。`,
+              "success",
+            );
+          } catch (e) {
+            const message = errorText(e, "リポジトリを作成できませんでした");
+            conn.fail(tx.id, message);
+            throw new Error(message);
+          }
+          return;
+        }
+
         const request = tx.request;
         const secrets = Object.fromEntries(
           request.secrets.map((name) => [name, vault.entries[name].value]),
@@ -632,28 +658,18 @@ export const KagiApp = clientEntry(
                 key={tx.id}
                 mix={[itemStyle, tx.id === focusTx ? focusStyle : null]}
               >
-                {isAppTokenRequest(tx.request)
-                  ? (
-                    <div mix={rowStyle}>
-                      <strong>GitHub トークン発行</strong>
-                      <strong mix={hostStyle}>{tx.request.owner}</strong>
-                      <span mix={badgeStyle} data-status={tx.status}>
-                        {STATUS_LABEL[tx.status]}
-                      </span>
-                    </div>
-                  )
-                  : (
-                    <div mix={rowStyle}>
-                      <strong>{methodOf(tx.request)}</strong>
-                      <strong mix={hostStyle}>{safeHost(tx.request)}</strong>
-                      <span mix={badgeStyle} data-status={tx.status}>
-                        {STATUS_LABEL[tx.status]}
-                      </span>
-                    </div>
-                  )}
+                <div mix={rowStyle}>
+                  <strong>{headingOf(tx.request)[0]}</strong>
+                  <strong mix={hostStyle}>{headingOf(tx.request)[1]}</strong>
+                  <span mix={badgeStyle} data-status={tx.status}>
+                    {STATUS_LABEL[tx.status]}
+                  </span>
+                </div>
                 <dl mix={detailsStyle}>
                   {isAppTokenRequest(tx.request)
                     ? appTokenDetails(tx.request)
+                    : isCreateRepoRequest(tx.request)
+                    ? createRepoDetails(tx.request)
                     : httpDetails(tx.request)}
                   <dt>受付</dt>
                   <dd>{new Date(tx.createdAt).toLocaleString()}</dd>
@@ -718,6 +734,43 @@ function safeHost(req: HttpRequest): string {
   } catch {
     return req.url;
   }
+}
+
+/** What a request is, and what it is about: the line the approver reads first. */
+function headingOf(req: KagiRequest): [string, string] {
+  if (isAppTokenRequest(req)) return ["GitHub トークン発行", req.owner];
+  if (isCreateRepoRequest(req)) {
+    return ["GitHub リポジトリ作成", `${req.owner}/${req.name}`];
+  }
+  if (isHttpRequest(req)) return [methodOf(req), safeHost(req)];
+  return ["?", ""];
+}
+
+function createRepoDetails(req: GithubCreateRepoRequest) {
+  return (
+    <>
+      <dt>リポジトリ</dt>
+      <dd>
+        <code>{req.owner}/{req.name}</code>
+      </dd>
+      <dt>公開範囲</dt>
+      <dd>
+        {req.visibility === "public" ? "公開 (public)" : "非公開 (private)"}
+      </dd>
+      {req.description !== undefined && (
+        <>
+          <dt>説明</dt>
+          <dd>{req.description}</dd>
+        </>
+      )}
+      <dt>初期コミット</dt>
+      <dd>{req.autoInit ? "README で作る" : "なし（空のリポジトリ）"}</dd>
+      <dt>使う App</dt>
+      <dd>
+        <code>[{req.app}]</code>
+      </dd>
+    </>
+  );
 }
 
 function describeSecret(entry: SecretEntry): string {

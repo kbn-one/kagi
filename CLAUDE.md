@@ -24,6 +24,10 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   端末鍵）、`connection.ts`（WebSocket。結果はメモリにだけ保持）、
   `substitute.ts`（`[NAME]` の置換、送信先ホスト制限、結果からの秘密の除去）、
   画面は `islands/kagi_app.tsx`（`/kagi`）。
+- リクエストは 3 種類（`protocol.ts` の `KagiRequest`）。3 つめは
+  `github-create-repo`: スマホが App でリポジトリを作り（作成用トークンはスマホ
+  内で使い捨て、直後に revoke）、名前と URL だけを返す。公開範囲は必須。CLI は
+  `tools/git_credential_kagi.ts create owner/name --public|--private`。
 - リクエストは 2 種類（`protocol.ts` の `KagiRequest`）: `[NAME]` を埋めて API
   を 呼ぶ `http`（既定）と、GitHub App の installation token を 1
   リポジトリ・指定 権限・1 時間に絞って発行する

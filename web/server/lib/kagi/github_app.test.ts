@@ -3,6 +3,7 @@ import { generateKeyPairSync } from "node:crypto";
 
 import {
   appJwt,
+  createRepository,
   mintInstallationToken,
   pemToPkcs8,
 } from "../../../client/lib/kagi/github_app.ts";
@@ -203,5 +204,153 @@ Deno.test("an App key is only usable for token requests, never inside an HTTP re
     secretsProblem(req, { GH_APP: { value: "x", hosts: [] } })?.includes(
       "GitHub App ではありません",
     ),
+  );
+});
+
+/** A GitHub that can create repositories, for an organization or a user account. */
+function fakeCreator(
+  accountType: "Organization" | "User",
+  createdAs?: string,
+  account = "kbn-one",
+) {
+  const calls: {
+    method: string;
+    path: string;
+    auth: string;
+    body?: unknown;
+  }[] = [];
+  const fetchImpl = ((input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const method = init?.method ?? "GET";
+    const auth = new Headers(init?.headers).get("authorization") ?? "";
+    calls.push({
+      method,
+      path: url.pathname,
+      auth: auth.startsWith("Bearer ghs_") ? "installation" : "app-jwt",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    const json = (body: unknown, status = 200) =>
+      Promise.resolve(Response.json(body, { status }));
+    if (url.pathname.endsWith("/installation")) {
+      const isOrgPath = url.pathname.startsWith("/orgs/");
+      if (isOrgPath !== (accountType === "Organization")) {
+        return json({ message: "Not Found" }, 404);
+      }
+      return json({ id: 42, account: { type: accountType } });
+    }
+    if (url.pathname === "/app/installations/42/access_tokens") {
+      return json({ token: "ghs_internal_only" }, 201);
+    }
+    if (url.pathname === "/installation/token") {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    const body = JSON.parse(String(init!.body));
+    return json({
+      full_name: createdAs ?? `${account}/${body.name}`,
+      html_url: `https://github.com/${account}/${body.name}`,
+      clone_url: `https://github.com/${account}/${body.name}.git`,
+      private: body.private,
+      visibility: body.private ? "private" : "public",
+      default_branch: "main",
+    }, 201);
+  }) as typeof fetch;
+  return { calls, fetchImpl };
+}
+
+const createReq = {
+  type: "github-create-repo",
+  app: "GH_APP",
+  owner: "kbn-one",
+  name: "new-repo",
+  visibility: "public",
+  description: "made by kagi",
+} as const;
+
+Deno.test("createRepository creates a public org repository and revokes its token", async () => {
+  const { calls, fetchImpl } = fakeCreator("Organization");
+  const result = await createRepository(createReq, app, fetchImpl);
+  assertEquals(result.status, 201);
+  assertEquals(JSON.parse(result.body), {
+    full_name: "kbn-one/new-repo",
+    html_url: "https://github.com/kbn-one/new-repo",
+    clone_url: "https://github.com/kbn-one/new-repo.git",
+    visibility: "public",
+    default_branch: "main",
+  });
+  // The token that created it never reaches the requester.
+  assert(!result.body.includes("ghs_internal_only"));
+  assertEquals(
+    calls.map((c) => `${c.method} ${c.path} (${c.auth})`),
+    [
+      "GET /orgs/kbn-one/installation (app-jwt)",
+      "POST /app/installations/42/access_tokens (app-jwt)",
+      "POST /orgs/kbn-one/repos (installation)",
+      "DELETE /installation/token (installation)",
+    ],
+  );
+  assertEquals(calls[2].body, {
+    name: "new-repo",
+    private: false,
+    description: "made by kagi",
+  });
+});
+
+Deno.test("createRepository uses /user/repos for a personal account, and private when asked", async () => {
+  const { calls, fetchImpl } = fakeCreator("User", undefined, "kuboon");
+  const result = await createRepository(
+    { ...createReq, owner: "kuboon", visibility: "private", autoInit: true },
+    app,
+    fetchImpl,
+  );
+  assertEquals(JSON.parse(result.body).visibility, "private");
+  assertEquals(
+    calls.filter((c) => c.method === "POST").map((c) => c.path),
+    ["/app/installations/42/access_tokens", "/user/repos"],
+  );
+  assertEquals(calls.find((c) => c.path === "/user/repos")?.body, {
+    name: "new-repo",
+    private: true,
+    description: "made by kagi",
+    auto_init: true,
+  });
+});
+
+Deno.test("createRepository refuses a result that is not the requested repository, and still revokes", async () => {
+  const { calls, fetchImpl } = fakeCreator("Organization", "kbn-one/other");
+  await assertRejects(() => createRepository(createReq, app, fetchImpl));
+  assertEquals(calls.at(-1)?.path, "/installation/token");
+});
+
+Deno.test("create-repo requests must state visibility and a plain name", () => {
+  const base = {
+    type: "github-create-repo",
+    app: "GH_APP",
+    owner: "kbn-one",
+  } as const;
+  const cases: [unknown, string][] = [
+    [{ ...base, name: "x" }, "visibility"],
+    [{ ...base, name: "x", visibility: "internal" }, "visibility"],
+    [{ ...base, name: "a/b", visibility: "public" }, "name"],
+    [
+      { ...base, name: "x", visibility: "public", description: 1 },
+      "description",
+    ],
+    [{ ...base, name: "x", visibility: "public", autoInit: "yes" }, "autoInit"],
+  ];
+  for (const [body, fragment] of cases) {
+    const parsed = parseKagiRequest(body);
+    assert(typeof parsed === "string", JSON.stringify(body));
+    assert(parsed.includes(fragment), `${parsed} / ${fragment}`);
+  }
+  assertEquals(
+    parseKagiRequest({ ...base, name: "x", visibility: "public" }),
+    { ...base, name: "x", visibility: "public" },
+  );
+  // Like a token request, it needs an App, never a plain secret.
+  assert(
+    secretsProblem(
+      { ...createReq },
+      { GH_APP: { value: "x", hosts: [] } },
+    )?.includes("GitHub App ではありません"),
   );
 });

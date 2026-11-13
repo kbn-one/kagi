@@ -6,7 +6,7 @@
 
 import {
   type HttpRequest,
-  isAppTokenRequest,
+  isHttpRequest,
   type KagiRequest,
   type KagiResult,
   methodOf,
@@ -67,7 +67,7 @@ export function secretsProblem(
   req: KagiRequest,
   vault: Record<string, SecretEntry>,
 ): string | null {
-  if (isAppTokenRequest(req)) {
+  if (!isHttpRequest(req)) {
     const entry = vault[req.app];
     if (!entry) return `GitHub App ${req.app} が保存されていません`;
     if (!isAppSecret(entry)) return `${req.app} は GitHub App ではありません`;

@@ -23,7 +23,9 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   localStorage）、`device.ts`（subscription と IndexedDB の非 extractable ECDSA
   端末鍵）、`connection.ts`（WebSocket。結果はメモリにだけ保持）、
   `substitute.ts`（`[NAME]` の置換、送信先ホスト制限、結果からの秘密の除去）、
-  画面は `islands/kagi_app.tsx`（`/kagi`）。
+  `brief.ts`（AI エージェントに渡す説明。URL 入り、秘密は名前だけ。承認画面の
+  「リクエスト元の設定」からコピー）、 画面は
+  `islands/kagi_app.tsx`（`/kagi`）。
 - リクエストは 3 種類（`protocol.ts` の `KagiRequest`）。3 つめは
   `github-create-repo`: スマホが App でリポジトリを作り（作成用トークンはスマホ
   内で使い捨て、直後に revoke）、名前と URL だけを返す。公開範囲は必須。CLI は

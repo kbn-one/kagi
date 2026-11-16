@@ -46,6 +46,7 @@ import {
   pushDone,
   pushStatus,
 } from "../lib/kagi/setup.ts";
+import { agentBrief } from "../lib/kagi/brief.ts";
 import { connect, type KagiConnection } from "../lib/kagi/connection.ts";
 import {
   createSubscription,
@@ -872,13 +873,52 @@ export const KagiApp = clientEntry(
       </details>
     );
 
+    const brief = (id: string) =>
+      agentBrief({
+        base: endpoint(routes.api.sub.register.href({ id })),
+        secrets: unlocked?.entries,
+      });
+
+    const onCopyBrief = (id: string) =>
+      run(async () => {
+        await navigator.clipboard.writeText(brief(id));
+        setStatus(
+          "エージェント向けの説明をコピーしました。URL を含むので、渡す相手に気をつけてください。",
+          "success",
+        );
+      });
+
     const requesterSection = (id: string) => (
       <details mix={foldStyle}>
         <summary>リクエスト元の設定</summary>
         <p mix={mutedStyle}>
-          リクエスト元はこの URL を使います。ID を知っている人は誰でも
-          リクエストを送れるので、ID は秘密にしてください。
+          AI エージェントには、この URL と使い方をまとめた説明を渡します。ID
+          を知っている人は誰でもリクエストを送れるので、ID
+          は秘密にしてください。
         </p>
+        <div mix={rowStyle}>
+          <button
+            type="button"
+            disabled={busy}
+            mix={[
+              actionStyle,
+              primaryStyle,
+              on("click", () => void onCopyBrief(id)),
+            ]}
+          >
+            エージェント向けの説明をコピー
+          </button>
+        </div>
+        <p mix={mutedStyle}>
+          {unlocked
+            ? "秘密の名前も含めています（値は含みません）。"
+            : "秘密の名前も入れるなら、先に「秘密」をパスキーで開いてからコピーしてください。"}
+        </p>
+        <details>
+          <summary mix={mutedStyle}>内容を見る</summary>
+          <pre mix={codeStyle}>{brief(id)}</pre>
+        </details>
+        <p mix={mutedStyle}>curl で試すなら:</p>
         <pre mix={codeStyle}>{usage(endpoint, id)}</pre>
         <p mix={mutedStyle}>
           git push を GitHub App で 1 リポジトリに絞るなら、エージェント側で:

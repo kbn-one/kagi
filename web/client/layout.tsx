@@ -121,7 +121,31 @@ export function Layout(handle: Handle<LayoutProps>) {
           <meta charset="utf-8" />
           <meta
             name="viewport"
-            content="width=device-width, initial-scale=1"
+            content="width=device-width, initial-scale=1, viewport-fit=cover"
+          />
+          <link rel="manifest" href="/manifest.webmanifest" />
+          <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+          <meta name="mobile-web-app-capable" content="yes" />
+          <meta name="apple-mobile-web-app-capable" content="yes" />
+          <meta name="apple-mobile-web-app-title" content="kagi" />
+          {
+            /* `default`, not `black-translucent`: on iOS 26 a translucent status bar is drawn with a
+              blur band over the page's top. With `default` the bar is opaque and tinted from
+              theme-color, which therefore matches --bg in each scheme. */
+          }
+          <meta
+            name="apple-mobile-web-app-status-bar-style"
+            content="default"
+          />
+          <meta
+            name="theme-color"
+            media="(prefers-color-scheme: light)"
+            content="#ffffff"
+          />
+          <meta
+            name="theme-color"
+            media="(prefers-color-scheme: dark)"
+            content="#0b0f19"
           />
           <title>{props.title}</title>
           {props.description
@@ -225,7 +249,9 @@ const bandStyle = css({
   width: "100%",
   maxWidth: contentWidth,
   marginInline: "auto",
-  paddingInline: "1.25rem",
+  // Clear the notch in a landscape standalone launch (`viewport-fit=cover`).
+  paddingInline:
+    "max(1rem, env(safe-area-inset-left)) max(1rem, env(safe-area-inset-right))",
 });
 
 const headerStyle = css({
@@ -251,10 +277,12 @@ const navStyle = css({
   gap: "1rem",
 });
 
-const mainStyle = css({ paddingBlock: "2.5rem" });
+const mainStyle = css({ paddingBlock: "1.5rem 2.5rem" });
 
 const footerStyle = css({
-  paddingBlock: "2rem",
+  paddingBlockStart: "2rem",
+  // The home indicator, in a standalone launch.
+  paddingBlockEnd: "max(2rem, env(safe-area-inset-bottom))",
   borderTop: `1px solid ${color.border}`,
   color: color.muted,
   fontSize: "0.9rem",

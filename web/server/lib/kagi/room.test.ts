@@ -55,6 +55,8 @@ async function setup(now = () => Date.now()) {
   };
   /** `endpoint txId` of every push sent. */
   const notified: string[] = [];
+  /** Endpoints sent the confirmation push. */
+  const confirmed: string[] = [];
   /** What the push service answers next. */
   const pushService: { outcome: NotifyOutcome } = { outcome: "sent" };
   const push: ApprovalPush = {
@@ -62,6 +64,10 @@ async function setup(now = () => Date.now()) {
     notify: (subscription, tx) => {
       notified.push(`${subscription.endpoint} ${tx.id}`);
       return Promise.resolve(pushService.outcome);
+    },
+    confirm: (subscription) => {
+      confirmed.push(subscription.endpoint);
+      return Promise.resolve("sent");
     },
   };
   const hub = createMemoryHub({ upgrade, push, now });
@@ -101,7 +107,7 @@ async function setup(now = () => Date.now()) {
     socket.emit({ type: "auth", signature });
     return socket;
   };
-  return { hub, connect, notified, pushService };
+  return { hub, connect, notified, confirmed, pushService };
 }
 
 const submit = (hub: KagiHub, body: unknown) =>
@@ -400,4 +406,26 @@ Deno.test("a failed push keeps the subscription", async () => {
   assertEquals((await (await submit(hub, ghRequest)).json()).notified, false);
   await submit(hub, ghRequest);
   assertEquals(notified.length, 2);
+});
+
+Deno.test("a new push subscription gets a confirmation push, a resent one does not", async () => {
+  const { connect, confirmed } = await setup();
+  const phone = await connect();
+  await phone.next();
+  phone.emit({
+    type: "push",
+    subscription: subscription("https://push.example/1"),
+  });
+  await phone.next();
+  phone.emit({
+    type: "push",
+    subscription: subscription("https://push.example/1"),
+  });
+  await phone.next();
+  phone.emit({
+    type: "push",
+    subscription: subscription("https://push.example/2"),
+  });
+  await phone.next();
+  assertEquals(confirmed, ["https://push.example/1", "https://push.example/2"]);
 });

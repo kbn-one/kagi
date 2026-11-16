@@ -385,7 +385,15 @@ export class Room {
         return send({ type: "error", detail: parsed });
       }
       const { endpoint, keys: { p256dh, auth } } = parsed;
+      const isNew = registration.push?.endpoint !== endpoint;
       registration.push = { endpoint, keys: { p256dh, auth } };
+      if (isNew) {
+        // Not awaited: the phone should hear `registered` now, and the push arrives on its own.
+        const pushed = registration.push;
+        void this.#deps.push.confirm(pushed).catch((e) =>
+          console.error("kagi: confirmation push failed", e)
+        );
+      }
     }
     await this.#deps.storage.put(REG_KEY, registration);
     send({ type: "push", registered: !!registration.push });

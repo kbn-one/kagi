@@ -80,7 +80,8 @@ Deno.test("GET /kagi renders the approver island", async () => {
   assertEquals(res.status, 200);
   const html = await res.text();
   assertStringIncludes(html, "/assets/islands/kagi_app");
-  assertStringIncludes(html, "<h2>秘密</h2>");
+  // Everything on it depends on this phone's storage, so the server renders a placeholder.
+  assertStringIncludes(html, 'aria-busy="true"');
 });
 
 Deno.test("/api/sub answers problems for unknown subscriptions", async () => {
@@ -108,4 +109,32 @@ Deno.test("GET /docs explains setup, requests and the git credential helper", as
   // Reachable from every page, so the static build writes it.
   const home = await (await router.fetch(new Request("http://x/"))).text();
   assertStringIncludes(home, 'href="/docs"');
+});
+
+Deno.test("the web app manifest starts the home-screen app at /kagi, with PNG icons", async () => {
+  const res = await router.fetch(new Request("http://x/manifest.webmanifest"));
+  assertStringIncludes(res.headers.get("content-type") ?? "", "manifest+json");
+  const manifest = await res.json() as {
+    start_url: string;
+    display: string;
+    icons: { src: string; sizes: string }[];
+  };
+  assertEquals(manifest.start_url, "/kagi");
+  assertEquals(manifest.display, "standalone");
+  for (const icon of manifest.icons) {
+    const png = await router.fetch(new Request(`http://x${icon.src}`));
+    assertEquals(png.headers.get("content-type"), "image/png");
+    const bytes = new Uint8Array(await png.arrayBuffer());
+    // PNG signature, then the IHDR width.
+    assertEquals(bytes[1], 0x50);
+    const width = new DataView(bytes.buffer).getUint32(16);
+    assertEquals(`${width}x${width}`, icon.sizes);
+  }
+  const html = await (await router.fetch(new Request("http://x/"))).text();
+  assertStringIncludes(html, 'rel="manifest"');
+  assertStringIncludes(html, 'rel="apple-touch-icon"');
+  assertStringIncludes(
+    html,
+    'name="apple-mobile-web-app-status-bar-style" content="default"',
+  );
 });

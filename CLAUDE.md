@@ -45,7 +45,16 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
 
 - `web/client/` — ブラウザに渡るもの全て (routes / pages / islands / layout /
   static / lib)。`deno.ns` 無しで型チェックされる。`Deno.` を参照しない。
-  - ページは `/`、`/kagi`（承認者の画面）、`/docs`（使い方）。
+  - ページは `/`（仕組みの概要と、ホーム画面への追加を促す
+    `islands/setup_cta.tsx`）、 `/kagi`（承認者の画面。manifest の
+    `start_url`）、`/docs`（使い方）。
+  - スマホで使う前提。`/kagi` は準備が済むまで 1 画面 1 ステップで進む:
+    ホーム画面 に追加 → 通知を有効にする（同時に承認者として登録）→
+    パスキーを作る。判定は `lib/kagi/setup.ts`（端末の判定は
+    `@kuboon/browser-how-to`）。iPhone 以外は 「このブラウザーで続ける」で 1
+    つめを飛ばせる。
+  - `/manifest.webmanifest` とアイコン（`server/icon.ts` が Skia で描く PNG）は
+    `router.tsx` のルートで、静的ビルドの `entryPoints` に入れてある。
 - `web/server/` — router・asset bundler・API・config・og 画像・Worker。
   - `router.tsx` — ローカル (`deno serve`)・テスト・静的ビルドが使う唯一の
     ルーター定義。

@@ -31,6 +31,7 @@ async function setup(approve: boolean) {
     push: {
       applicationServerKey: () => Promise.resolve(null),
       notify: () => Promise.resolve("sent"),
+      confirm: () => Promise.resolve("sent"),
     },
   });
   const keys = await crypto.subtle.generateKey(

@@ -55,6 +55,7 @@
   "imports": {
     "@cloudflare/build-output-utils": "npm:@cloudflare/build-output-utils@0.9.1",
     "@cloudflare/config": "npm:@cloudflare/config@0.25.0",
+    "@kuboon/browser-how-to": "jsr:@kuboon/browser-how-to@^0.2.0",
     "@lightpanda/browser": "npm:@lightpanda/browser@^1.6.0",
     "@remix-kbn/assets-deno": "jsr:@remix-kbn/assets-deno@^0.9.0",
     "@remix-kbn/ssg": "jsr:@remix-kbn/ssg@^0.13.0",

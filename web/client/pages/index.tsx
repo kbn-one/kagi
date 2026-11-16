@@ -1,96 +1,91 @@
 import { css, type Handle } from "@remix-run/component";
 
+import { SetupCta } from "../islands/setup_cta.tsx";
 import { routes } from "../routes.ts";
 import { cardStyle } from "../theme.ts";
+import { color, radius } from "../tokens.ts";
 
 export const title = "kagi";
 export const description =
   "秘密トークンを承認者のスマホのブラウザー内に持ち、API コールを検閲してから実行する。";
 
-/** The shell places the sign-in island, so every page boots the runtime. */
+/** The call to action reads the device, so the page boots the runtime. */
 export const hydrate = true;
 
 export default function Home(_handle: Handle) {
   return () => (
     <>
       <h1>kagi</h1>
-      <p>
-        秘密トークンを<strong>承認者のスマホのブラウザー内</strong>
-        に持ち、API コールを検閲する。 リクエスト元（スクリプトや AI
-        エージェント）は秘密を知らないまま、承認された API
-        コールの結果だけを受け取る。
-      </p>
-      <p>
-        <a href={routes.kagi.href()}>承認者の画面を開く</a>
-        {" / "}
-        <a href={routes.docs.href()}>使い方</a>
+      <p mix={leadStyle}>
+        API のトークンを<strong>スマホの中</strong>
+        に置いたまま、スクリプトや AI エージェントに API を使わせる。
+        呼び出しは一件ずつスマホに届き、あなたが承認したものだけが実行される。
       </p>
 
-      <section mix={cardStyle}>
-        <h2>流れ</h2>
-        <ol mix={listStyle}>
-          <li>
-            承認者はスマホでこのサイトをホーム画面に追加する。サインインは要らない。
-          </li>
-          <li>
-            <a href={routes.kagi.href()}>承認</a>{" "}
-            で秘密を保存する。秘密は localStorage に、パスキー（WebAuthn
-            PRF）で暗号化して置かれ、サーバーには送られない。
-          </li>
-          <li>
-            同じ画面で端末を承認者として登録すると、リクエスト用の URL （<code>
-              /api/sub/:id/req
-            </code>）が発行される。
-          </li>
-          <li>
-            リクエスト元が <code>POST /api/sub/:id/req</code> に、秘密を{" "}
-            <code>[NAME]</code>{" "}
-            で埋めたリクエストを送る。サーバーは承認者のスマホに push
-            通知し、<code>transaction_id</code> を返す。
-          </li>
-          <li>
-            承認者は内容（送信先ホスト・ヘッダー・ボディ）を見て、パスキーで承認する。
-            ブラウザーが秘密を埋めて API を呼び、結果を手元に保持する。
-          </li>
-          <li>
-            リクエスト元の <code>GET /api/sub/:id/res?transaction_id=…</code>
+      <section mix={[cardStyle, ctaStyle]}>
+        <SetupCta />
+      </section>
+
+      <h2>仕組み</h2>
+      <ul mix={rolesStyle}>
+        <li>
+          <strong>リクエスト元</strong>
+          <span>
+            スクリプトやエージェント。トークンを知らず、<code>[GH_TOKEN]</code>
             {" "}
-            に、サーバーが WebSocket
-            越しにスマホから結果を取り寄せて返す（一度だけ）。
-            結果に含まれる秘密の値は <code>[NAME]</code> に置き換えられる。
-          </li>
-        </ol>
-      </section>
+            のような名前で書いたリクエストを kagi に送る。
+          </span>
+        </li>
+        <li>
+          <strong>サーバー</strong>
+          <span>
+            リクエストを預かってスマホに通知し、結果を受け渡すだけ。トークンは見ない。
+          </span>
+        </li>
+        <li>
+          <strong>あなたのスマホ</strong>
+          <span>
+            トークンをパスキーで暗号化して持つ。内容を確かめてパスキーで承認すると、
+            スマホが名前をトークンに置き換えて API を呼び、結果を返す。
+          </span>
+        </li>
+      </ul>
 
-      <section mix={cardStyle}>
-        <h2>リクエストの形</h2>
-        <pre mix={preStyle}>{`POST /api/sub/:id/req
-{
-  "secrets": ["GH_SECRET"],
-  "url": "https://api.github.com/user",
-  "method": "GET",
-  "headers": { "authorization": "Bearer [GH_SECRET]" },
-  "body": {}
-}
-→ 202 { "transaction_id": "…", "status": "pending", "notified": true }
-
-GET /api/sub/:id/res?transaction_id=…&wait=25
-→ 200 { "status": "delivered", "response": { "status", "headers", "body" } }
-→ 202 { "status": "pending" }   まだ決まっていない（再度呼ぶ）
-→ 403 / 502 / 410               拒否 / 呼び出し失敗 / 期限切れ・受け渡し済み`}</pre>
-        <p>
-          API はブラウザーから呼ばれるので、呼び先が CORS
-          でこのオリジンを許可している必要がある。
-        </p>
-      </section>
+      <h2>はじめかた</h2>
+      <ol mix={stepsStyle}>
+        <li>このページをスマホで開き、ホーム画面に追加する。</li>
+        <li>ホーム画面の kagi を開き、通知を有効にする。</li>
+        <li>パスキーを作り、API のトークンを登録する。</li>
+        <li>
+          表示される URL をリクエスト元に設定する。
+        </li>
+      </ol>
+      <p>
+        リクエストの書き方や GitHub での使い方は{" "}
+        <a href={routes.docs.href()}>使い方</a>。
+      </p>
     </>
   );
 }
 
-const listStyle = css({ paddingInlineStart: "1.25rem", lineHeight: 1.7 });
+const leadStyle = css({ fontSize: "1.05rem", lineHeight: 1.8 });
 
-const preStyle = css({
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-all",
-  fontSize: "0.85rem",
+const ctaStyle = css({ marginBlock: "1.5rem" });
+
+const rolesStyle = css({
+  listStyle: "none",
+  padding: 0,
+  display: "grid",
+  gap: "0.75rem",
+  "& li": {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.25rem",
+    padding: "0.9rem 1rem",
+    border: `1px solid ${color.border}`,
+    borderRadius: radius.md,
+  },
+  "& span": { color: color.muted, fontSize: "0.95rem" },
 });
+
+const stepsStyle = css({ paddingInlineStart: "1.25rem", lineHeight: 1.9 });

@@ -30,9 +30,7 @@ export default function Home(_handle: Handle) {
         <h2>流れ</h2>
         <ol mix={listStyle}>
           <li>
-            承認者はスマホでこのサイトをホーム画面に追加し、
-            <a href={routes.my.href()}>マイページ</a>{" "}
-            でサインインして通知を登録する。
+            承認者はスマホでこのサイトをホーム画面に追加する。サインインは要らない。
           </li>
           <li>
             <a href={routes.kagi.href()}>承認</a>{" "}

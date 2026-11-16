@@ -4,7 +4,18 @@
  * Authenticates with the device key, keeps the list of open transactions, and reconnects with a
  * backoff while the page is visible. Results are held here, in memory only, until the server
  * relays a requester's `get` — they never touch storage.
+ *
+ * It also keeps the server's copy of this phone's push subscription current: once notifications
+ * are allowed, every connection subscribes (no prompt, `@remix-kbn/web-push/client` reuses the
+ * existing subscription or replaces one made with another key) and sends it. So a subscription the
+ * push service dropped, or a new server key, mends itself the next time `/kagi` is opened.
  */
+
+import {
+  isPushSupported,
+  subscribePush,
+  unsubscribePush,
+} from "@remix-kbn/web-push/client";
 
 import type {
   ClientMessage,
@@ -17,9 +28,22 @@ import { routes } from "../../routes.ts";
 
 export type ConnectionState = "connecting" | "online" | "offline";
 
+/**
+ * Whether this phone gets pushed: `on`, `off` (it could be, press the button), `denied` (blocked in
+ * the browser's settings), `unsupported` (no Push API, or iPhone outside the Home Screen app) or
+ * `unavailable` (the server sends no pushes).
+ */
+export type PushState = "on" | "off" | "denied" | "unsupported" | "unavailable";
+
 export interface KagiConnection {
   readonly state: ConnectionState;
   readonly transactions: Map<string, Transaction>;
+  /** Unknown (null) until the connection is ready. */
+  readonly push: PushState | null;
+  /** Asks for notification permission (call it from a click) and starts the pushes. */
+  enablePush(): Promise<void>;
+  /** Stops the pushes to this phone. */
+  disablePush(): Promise<void>;
   decide(txId: string, approved: boolean): void;
   /** The call finished: keep its result until asked. */
   complete(txId: string, result: KagiResult): void;
@@ -34,6 +58,8 @@ export function connect(
   const transactions = new Map<string, Transaction>();
   const results = new Map<string, KagiResult>();
   let state: ConnectionState = "connecting";
+  let applicationServerKey: string | null = null;
+  let pushStored = false;
   let socket: WebSocket | null = null;
   let closed = false;
   let retry = 0;
@@ -81,6 +107,18 @@ export function connect(
             state = "online";
             transactions.clear();
             for (const t of m.transactions) transactions.set(t.id, t);
+            applicationServerKey = m.applicationServerKey;
+            pushStored = m.push;
+            // Allowed before: refresh what the server has, without a prompt.
+            if (
+              applicationServerKey && isPushSupported() &&
+              Notification.permission === "granted"
+            ) {
+              void subscribe().catch((e) => console.warn("kagi: push", e));
+            }
+            break;
+          case "push":
+            pushStored = m.registered;
             break;
           case "tx":
             transactions.set(m.transaction.id, m.transaction);
@@ -108,6 +146,23 @@ export function connect(
     });
   };
 
+  const subscribe = async () => {
+    if (!applicationServerKey) throw new Error("サーバーが通知を送れません。");
+    const subscription = await subscribePush({
+      applicationServerKey,
+      serviceWorkerUrl: "/sw.js",
+    });
+    send({ type: "push", subscription });
+  };
+
+  const pushState = (): PushState | null => {
+    if (state !== "online") return null;
+    if (!applicationServerKey) return "unavailable";
+    if (!isPushSupported()) return "unsupported";
+    if (Notification.permission === "denied") return "denied";
+    return pushStored ? "on" : "off";
+  };
+
   const onVisible = () => {
     if (document.visibilityState === "visible" && !socket && !closed) {
       clearTimeout(timer);
@@ -122,6 +177,16 @@ export function connect(
       return state;
     },
     transactions,
+    get push() {
+      return pushState();
+    },
+    async enablePush() {
+      await subscribe();
+    },
+    async disablePush() {
+      send({ type: "push", subscription: null });
+      await unsubscribePush();
+    },
     decide: (txId, approved) => send({ type: "decision", txId, approved }),
     complete(txId, result) {
       results.set(txId, result);

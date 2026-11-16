@@ -15,11 +15,8 @@ async function assertProblem(res: Response, status: number) {
   return body;
 }
 
-Deno.test("worker serves the RP JWKS", async () => {
-  const res = await get("/.well-known/jwks.json");
-  assertEquals(res.status, 200);
-  const body = await res.json() as { keys: { kty: string }[] };
-  assertEquals(body.keys[0].kty, "EC");
+Deno.test("worker no longer serves a JWKS (no IdP to verify us)", async () => {
+  await assertProblem(await get("/.well-known/jwks.json"), 404);
 });
 
 Deno.test("worker does not render pages (static assets answer those)", async () => {

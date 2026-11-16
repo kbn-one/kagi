@@ -2,14 +2,16 @@
   "version": "5",
   "specifiers": {
     "jsr:@deno/loader@0.5": "0.5.0",
-    "jsr:@kuboon/dpop@~0.1.2": "0.1.2",
-    "jsr:@panva/jose@^6.2.3": "6.2.12",
+    "jsr:@negrel/http-ece@0.7.0": "0.7.0",
+    "jsr:@negrel/webpush@0.5": "0.5.0",
     "jsr:@remix-kbn/assets-deno@0.9": "0.9.0",
     "jsr:@remix-kbn/ssg@*": "0.13.0",
     "jsr:@remix-kbn/ssg@0.13": "0.13.0",
+    "jsr:@remix-kbn/web-push@0.1": "0.1.0",
     "jsr:@std/assert@^1.0.19": "1.0.19",
+    "jsr:@std/bytes@1": "1.0.6",
     "jsr:@std/cli@1": "1.0.32",
-    "jsr:@std/encoding@1.0.10": "1.0.10",
+    "jsr:@std/encoding@1": "1.0.11",
     "jsr:@std/fs@^1.0.24": "1.0.24",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@std/internal@^1.0.14": "1.0.14",
@@ -34,17 +36,23 @@
     "@deno/loader@0.5.0": {
       "integrity": "a6d94408de5e6bacac404f8f6963c8b8cc278cfd1a878aa2f06b34a083d6bfee"
     },
-    "@kuboon/dpop@0.1.2": {
-      "integrity": "30de96c140e7b23e2ebee0145c75adc9dfe04ecbe288546348bd4b619b733add",
+    "@negrel/http-ece@0.7.0": {
+      "integrity": "068e61ba6f52da5454051a283cc19621607f8dd6e74d55c01bb365b8c6644076",
       "dependencies": [
+        "jsr:@std/bytes",
+        "jsr:@std/encoding"
+      ]
+    },
+    "@negrel/webpush@0.5.0": {
+      "integrity": "919ed5bf4d676923667c5278093f36ffb2efe7fe2f155b6d32723ea3b73fa693",
+      "dependencies": [
+        "jsr:@negrel/http-ece",
+        "jsr:@std/bytes",
         "jsr:@std/encoding"
       ]
     },
     "@panva/jose@6.2.3": {
       "integrity": "57cc772f01b2ac60f847a7e6ec815059762768186266ed833fb59953e9611312"
-    },
-    "@panva/jose@6.2.12": {
-      "integrity": "45dd3888cff0c45dbd91ca5279f7fd4324227042d19df91504aa2c0678b3edcc"
     },
     "@remix-kbn/assets-deno@0.9.0": {
       "integrity": "8295e2882f80fea7961922420541e30bbb8f78b1dd40378aadc1ba711ec5ee0b",
@@ -62,17 +70,26 @@
         "npm:es-module-lexer@^2.3.0"
       ]
     },
+    "@remix-kbn/web-push@0.1.0": {
+      "integrity": "2a7d7cbd9580bc119f7c893ba171c8e90d33ee2dbe9bdb9d42311c7e4bb0adbd",
+      "dependencies": [
+        "jsr:@negrel/webpush"
+      ]
+    },
     "@std/assert@1.0.19": {
       "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
       "dependencies": [
         "jsr:@std/internal@^1.0.12"
       ]
     },
+    "@std/bytes@1.0.6": {
+      "integrity": "f6ac6adbd8ccd99314045f5703e23af0a68d7f7e58364b47d2c7f408aeb5820a"
+    },
     "@std/cli@1.0.32": {
       "integrity": "188b3a100d6202d64e3f5bd3d799c7fa4f6d77f92cc65eb7f641c1fa0aa92a66"
     },
-    "@std/encoding@1.0.10": {
-      "integrity": "8783c6384a2d13abd5e9e87a7ae0520a30e9f56aeeaa3bdf910a3eaaf5c811a1"
+    "@std/encoding@1.0.11": {
+      "integrity": "e7cef2f0b3153bccc17431e7c864a1de03a4b6d9647389c43e08aaa775d37385"
     },
     "@std/fs@1.0.24": {
       "integrity": "f3061b45b81673a2bece689da041df32d174be064c89eb6397fb5718d3fb7877",
@@ -2118,10 +2135,9 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@kuboon/dpop@~0.1.2",
-      "jsr:@panva/jose@^6.2.3",
       "jsr:@remix-kbn/assets-deno@0.9",
       "jsr:@remix-kbn/ssg@0.13",
+      "jsr:@remix-kbn/web-push@0.1",
       "jsr:@std/assert@^1.0.19",
       "npm:@cloudflare/build-output-utils@0.9.1",
       "npm:@cloudflare/config@0.25.0",

@@ -19,7 +19,6 @@ import {
   type SerializableValue,
 } from "@remix-run/component";
 
-import { sessionStore } from "../session.ts";
 import { routes } from "../routes.ts";
 import {
   actionStyle,
@@ -29,7 +28,11 @@ import {
   primaryStyle,
 } from "../theme.ts";
 import { color, font, radius } from "../tokens.ts";
-import { connect, type KagiConnection } from "../lib/kagi/connection.ts";
+import {
+  connect,
+  type KagiConnection,
+  type PushState,
+} from "../lib/kagi/connection.ts";
 import {
   createSubscription,
   forgetSubscription,
@@ -95,7 +98,6 @@ const errorText = (e: unknown, fallback: string) =>
 export const KagiApp = clientEntry(
   import.meta.url,
   function KagiApp(handle: Handle<KagiAppProps>) {
-    let ready = false;
     let status: { message: string; kind: AlertKind } | null = null;
     let busy = false;
 
@@ -160,13 +162,6 @@ export const KagiApp = clientEntry(
         handle.update();
       }, 0);
       handle.signal.addEventListener("abort", () => connection?.close());
-      void sessionStore.load().then(() => {
-        ready = true;
-        handle.update();
-      });
-      sessionStore.addEventListener("change", () => handle.update(), {
-        signal: handle.signal,
-      });
     }
 
     // --- secrets --------------------------------------------------------------
@@ -297,11 +292,12 @@ export const KagiApp = clientEntry(
 
     const onSubscribe = () =>
       run(async () => {
-        const userId = sessionStore.userId;
-        if (!userId) throw new Error("先にサインインしてください。");
-        sub = await createSubscription(userId);
+        sub = await createSubscription();
         startConnection();
-        setStatus("この端末を承認者として登録しました。", "success");
+        setStatus(
+          "この端末を承認者として登録しました。続けて通知を有効にしてください。",
+          "success",
+        );
       });
 
     const onForget = () =>
@@ -315,6 +311,17 @@ export const KagiApp = clientEntry(
         connection = null;
         await forgetSubscription();
         sub = null;
+      });
+
+    const onEnablePush = () =>
+      run(async () => {
+        await connection?.enablePush();
+        setStatus("通知を有効にしました。", "success");
+      });
+
+    const onDisablePush = () =>
+      run(async () => {
+        await connection?.disablePush();
       });
 
     // --- requests -------------------------------------------------------------
@@ -574,26 +581,62 @@ export const KagiApp = clientEntry(
       </section>
     );
 
+    const pushRow = (push: PushState | null) => {
+      if (!push) return null;
+      const text: Record<PushState, string> = {
+        on: "通知: オン",
+        off: "通知: オフ。リクエストが来ても知らせが届きません。",
+        denied:
+          "通知: ブラウザーの設定でブロックされています。サイトの設定から許可してください。",
+        unsupported:
+          "通知: このブラウザーでは使えません。iPhone はホーム画面に追加したアプリから開いてください。",
+        unavailable: "通知: サーバーの通知が設定されていません。",
+      };
+      return (
+        <div>
+          <p mix={push === "on" ? null : mutedStyle}>{text[push]}</p>
+          {(push === "on" || push === "off") && (
+            <div mix={rowStyle}>
+              {push === "off"
+                ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    mix={[actionStyle, primaryStyle, on("click", onEnablePush)]}
+                  >
+                    通知を有効にする
+                  </button>
+                )
+                : (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    mix={[actionStyle, on("click", onDisablePush)]}
+                  >
+                    通知を止める
+                  </button>
+                )}
+            </div>
+          )}
+        </div>
+      );
+    };
+
     const subscriptionCard = () => {
-      const signedIn = !!sessionStore.userId;
       return (
         <section mix={cardStyle}>
           <h2>承認者の登録</h2>
-          {!(ready && loaded) && !sub && (
-            <p mix={mutedStyle} aria-busy="true">…</p>
-          )}
-          {ready && loaded && !sub && (
+          {!loaded && !sub && <p mix={mutedStyle} aria-busy="true">…</p>}
+          {loaded && !sub && (
             <div>
               <p mix={mutedStyle}>
-                リクエストが来たら、id.kbn.one 経由でこの端末に通知が届きます。
-                先に <a href={routes.my.href()}>マイページ</a>{" "}
-                でサインインし、通知を登録してください。 iPhone
+                リクエストが来たら、この端末に通知が届きます。 iPhone
                 はホーム画面に追加してから開いてください。
               </p>
               <div mix={rowStyle}>
                 <button
                   type="button"
-                  disabled={busy || !signedIn}
+                  disabled={busy}
                   mix={[actionStyle, primaryStyle, on("click", onSubscribe)]}
                 >
                   この端末を承認者として登録
@@ -613,6 +656,7 @@ export const KagiApp = clientEntry(
                     : "オフライン"}
                 </strong>
               </p>
+              {pushRow(connection?.push ?? null)}
               <p mix={mutedStyle}>
                 リクエスト元はこの URL を使います。ID を知っている人は誰でも
                 リクエストを送れるので、ID は秘密にしてください。

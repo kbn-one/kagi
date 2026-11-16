@@ -21,7 +21,11 @@ import {
   type Transaction,
   type TxStatus,
 } from "../../../client/lib/kagi/protocol.ts";
+import { parsePushSubscription } from "@remix-kbn/web-push";
+import type { PushSubscriptionData } from "@remix-kbn/web-push/server";
+
 import { problem } from "../problem.ts";
+import type { ApprovalPush } from "./notify.ts";
 
 /** The subset of Durable Object storage (`ctx.storage`) the room uses. */
 export interface RoomStorage {
@@ -38,17 +42,17 @@ export type Upgrade = (
 export interface RoomDeps {
   storage: RoomStorage;
   upgrade: Upgrade;
-  /** Tells the approver about a new transaction. Resolves to whether any device was reached. */
-  notify(registration: Registration, tx: Transaction): Promise<boolean>;
+  /** Tells the approver about a new transaction (`notify.ts`). */
+  push: ApprovalPush;
   now?: () => number;
 }
 
 export interface Registration {
   subId: string;
-  /** The approver's id.kbn.one user, whose devices the push goes to. */
-  userId: string;
   /** The approver's device key (ECDSA P-256), which signs the WebSocket challenge. */
   publicKey: JsonWebKey;
+  /** Where to push the approver, set over the authenticated WebSocket. */
+  push?: PushSubscriptionData;
   createdAt: number;
 }
 
@@ -127,10 +131,7 @@ export class Room {
   async #register(request: Request): Promise<Response> {
     const body = await readJson(request);
     if (body instanceof Response) return body;
-    const { userId, publicKey } = (body ?? {}) as Record<string, unknown>;
-    if (typeof userId !== "string" || !userId) {
-      return problem({ status: 400, detail: "userId must be a string" });
-    }
+    const { publicKey } = (body ?? {}) as Record<string, unknown>;
     if (!isP256PublicJwk(publicKey)) {
       return problem({
         status: 400,
@@ -146,7 +147,6 @@ export class Room {
     const { kty, crv, x, y } = publicKey;
     const registration: Registration = {
       subId: this.#subId,
-      userId,
       publicKey: { kty, crv, x, y },
       createdAt: this.#now(),
     };
@@ -190,17 +190,33 @@ export class Room {
     await this.#save(tx);
     this.#broadcast({ type: "tx", transaction: tx });
 
-    let notified = false;
-    try {
-      notified = await this.#deps.notify(registration, tx);
-    } catch (e) {
-      console.error("kagi: push failed", e);
-    }
+    const notified = await this.#notify(registration, tx);
 
     return Response.json(
       { transaction_id: tx.id, status: tx.status, notified },
       { status: 202 },
     );
+  }
+
+  /** Pushes `tx` to the approver; forgets a push subscription the push service says is dead. */
+  async #notify(registration: Registration, tx: Transaction): Promise<boolean> {
+    if (!registration.push) return false;
+    let outcome;
+    try {
+      outcome = await this.#deps.push.notify(registration.push, tx);
+    } catch (e) {
+      console.error("kagi: push failed", e);
+      return false;
+    }
+    if (outcome === "gone") {
+      const current = await this.#registration();
+      if (current?.push?.endpoint === registration.push.endpoint) {
+        delete current.push;
+        await this.#deps.storage.put(REG_KEY, current);
+        this.#broadcast({ type: "push", registered: false });
+      }
+    }
+    return outcome === "sent";
   }
 
   async #result(request: Request): Promise<Response> {
@@ -320,7 +336,12 @@ export class Room {
           const open = (await this.#transactions()).filter((t) =>
             !FINAL_STATUSES.includes(t.status)
           );
-          send({ type: "ready", transactions: open });
+          send({
+            type: "ready",
+            transactions: open,
+            applicationServerKey: await this.#applicationServerKey(),
+            push: !!(await this.#registration())?.push,
+          });
           // A requester may have been waiting while the phone was away.
           for (const t of open) {
             if (t.status === "done" && this.#waiters.has(t.id)) {
@@ -329,7 +350,7 @@ export class Room {
           }
           return;
         }
-        await this.#onApproverMessage(msg);
+        await this.#onApproverMessage(msg, send);
       }).catch((e) => {
         console.error("kagi: websocket message failed", e);
         send({ type: "error", detail: "Internal error" });
@@ -342,7 +363,39 @@ export class Room {
     return response;
   }
 
-  async #onApproverMessage(msg: ClientMessage): Promise<void> {
+  #applicationServerKey(): Promise<string | null> {
+    return this.#deps.push.applicationServerKey().catch((e) => {
+      console.error("kagi: no VAPID key", e);
+      return null;
+    });
+  }
+
+  /** Stores (or with null, drops) where to push the approver. */
+  async #setPush(
+    value: unknown,
+    send: (m: ServerMessage) => void,
+  ): Promise<void> {
+    const registration = await this.#registration();
+    if (!registration) return;
+    if (value === null) {
+      delete registration.push;
+    } else {
+      const parsed = parsePushSubscription(value);
+      if (typeof parsed === "string") {
+        return send({ type: "error", detail: parsed });
+      }
+      const { endpoint, keys: { p256dh, auth } } = parsed;
+      registration.push = { endpoint, keys: { p256dh, auth } };
+    }
+    await this.#deps.storage.put(REG_KEY, registration);
+    send({ type: "push", registered: !!registration.push });
+  }
+
+  async #onApproverMessage(
+    msg: ClientMessage,
+    send: (m: ServerMessage) => void,
+  ): Promise<void> {
+    if (msg.type === "push") return this.#setPush(msg.subscription, send);
     if (msg.type === "auth" || typeof msg.txId !== "string") return;
     const tx = await this.#load(msg.txId);
     if (!tx || FINAL_STATUSES.includes(tx.status)) return;

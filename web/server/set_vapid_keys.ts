@@ -1,26 +1,31 @@
 /**
- * Generates the RP's ES256 signing key and stores it as the Worker secret `RP_SIGNING_KEY_JWK`.
+ * Generates the VAPID key pair the approval push is signed with and stores it as the Worker secret
+ * `VAPID_KEYS`.
  *
- * The deploy workflow (`.github/workflows/cloudflare.yml`) runs it after the first deploy, and
- * `.github/workflows/signing-key.yml` runs it by hand to rotate (`deno task set-signing-key`). The private key goes
- * straight from memory to the Cloudflare API: it is never printed, written to disk, or passed on a
- * command line. Only the public key's thumbprint (the JWKS `kid`) is logged, so the run can be
- * checked against `/.well-known/jwks.json` after the next deploy.
+ * The deploy workflow (`.github/workflows/cloudflare.yml`) runs it when the Worker has no key yet,
+ * and `.github/workflows/vapid-keys.yml` runs it by hand to rotate (`deno task set-vapid-keys`). The
+ * private key goes straight from memory to the Cloudflare API: it is never printed, written to disk,
+ * or passed on a command line. Only the public key (the `applicationServerKey` phones subscribe
+ * with) is logged.
  *
  * With `--check` it only prints whether the Worker has the key (`1` / `0`).
  *
- * Refuses to replace an existing key unless `--rotate` is given: the IdP verifies our client
- * assertions against the JWKS, so a new key takes effect as soon as the Worker serves it, and an
- * accidental re-run should not be what rotates it.
+ * Refuses to replace an existing key unless `--rotate` is given: every phone's push subscription is
+ * tied to the key, so after a rotation no push arrives until the phone opens `/kagi` again (it then
+ * subscribes with the new key by itself).
  *
  * Needs `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit). The account and Worker come from
  * `cloudflare.config.ts`.
  */
 
 import { loadAndParseConfig } from "@cloudflare/config";
-import { calculateJwkThumbprint } from "jose";
+import {
+  applicationServerKey,
+  exportVapidKeys,
+  generateVapidKeys,
+} from "@remix-kbn/web-push/server";
 
-const SECRET = "RP_SIGNING_KEY_JWK";
+const SECRET = "VAPID_KEYS";
 const rotate = Deno.args.includes("--rotate");
 const check = Deno.args.includes("--check");
 
@@ -55,7 +60,7 @@ if (!existing.ok && existing.status !== 404) {
 }
 
 // `--check`: print 1 or 0 and change nothing. The deploy workflow uses it to decide whether
-// `cloudflare.config.ts` may declare the secret (see `KAGI_HAS_SIGNING_KEY` there).
+// `cloudflare.config.ts` may declare the secret (see `KAGI_HAS_VAPID_KEYS` there).
 if (check) {
   console.log(existing.ok ? "1" : "0");
   Deno.exit(0);
@@ -68,23 +73,14 @@ if (existing.ok && !rotate) {
   Deno.exit(1);
 }
 
-const { privateKey, publicKey } = await crypto.subtle.generateKey(
-  { name: "ECDSA", namedCurve: "P-256" },
-  true,
-  ["sign", "verify"],
-);
-const { kty, crv, x, y, d } = await crypto.subtle.exportKey("jwk", privateKey);
-const kid = await calculateJwkThumbprint(
-  await crypto.subtle.exportKey("jwk", publicKey),
-);
-
+const keys = await generateVapidKeys();
 const res = await fetch(api, {
   method: "PUT",
   headers: { ...headers, "content-type": "application/json" },
   body: JSON.stringify({
     name: SECRET,
     type: "secret_text",
-    text: JSON.stringify({ kty, crv, x, y, d }),
+    text: JSON.stringify(await exportVapidKeys(keys)),
   }),
 });
 const body = await res.json().catch(() => ({})) as {
@@ -100,7 +96,6 @@ if (!res.ok || body.success === false) {
 }
 
 console.log(
-  `${
-    rotate && existing.ok ? "Rotated" : "Set"
-  } ${SECRET} on ${worker}. kid: ${kid}`,
+  `${rotate && existing.ok ? "Rotated" : "Set"} ${SECRET} on ${worker}. ` +
+    `applicationServerKey: ${await applicationServerKey(keys)}`,
 );

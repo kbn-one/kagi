@@ -26,7 +26,13 @@ async function setup(approve: boolean) {
       response: new Response(null),
     };
   };
-  const hub = createMemoryHub({ upgrade, notify: () => Promise.resolve(true) });
+  const hub = createMemoryHub({
+    upgrade,
+    push: {
+      applicationServerKey: () => Promise.resolve(null),
+      notify: () => Promise.resolve("sent"),
+    },
+  });
   const keys = await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
     true,
@@ -79,7 +85,6 @@ async function setup(approve: boolean) {
   await fetchImpl(BASE, {
     method: "PUT",
     body: JSON.stringify({
-      userId: "u1",
       publicKey: await crypto.subtle.exportKey("jwk", keys.publicKey),
     }),
   });

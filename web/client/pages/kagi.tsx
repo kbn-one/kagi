@@ -1,6 +1,5 @@
 import type { Handle } from "@remix-run/component";
 
-import { IDP_ORIGIN } from "../idp.ts";
 import { KagiApp } from "../islands/kagi_app.tsx";
 
 export const title = "承認 — kagi";
@@ -13,7 +12,6 @@ export const hydrate = true;
 export default function Kagi(_handle: Handle) {
   return () => (
     <>
-      <meta name="idp-origin" content={IDP_ORIGIN} />
       <h1>承認</h1>
       <KagiApp />
     </>

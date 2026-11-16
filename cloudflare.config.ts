@@ -21,15 +21,14 @@ const envVar = (name: string): string | undefined =>
       .process?.env[name];
 
 /**
- * Whether the deployed Worker has the `RP_SIGNING_KEY_JWK` secret yet.
+ * Whether the deployed Worker has the `VAPID_KEYS` secret yet.
  *
- * Declaring a secret makes a deploy inherit it from the previous version, and the very first deploy
- * has none to inherit (`cannot inherit bindings: no previous version exists`). So the deploy
- * workflow checks first (`deno task set-signing-key --check`) and sets `KAGI_HAS_SIGNING_KEY=0`
- * when the secret is missing; anything else declares it, so a deploy that skipped the check never
- * drops an existing key.
+ * Declaring a secret makes a deploy inherit it from the previous version, and a version without it
+ * has none to inherit (`cannot inherit bindings`). So the deploy workflow checks first
+ * (`deno task set-vapid-keys --check`) and sets `KAGI_HAS_VAPID_KEYS=0` when the secret is missing;
+ * anything else declares it, so a deploy that skipped the check never drops an existing key.
  */
-const hasSigningKey = envVar("KAGI_HAS_SIGNING_KEY") !== "0";
+const hasVapidKeys = envVar("KAGI_HAS_VAPID_KEYS") !== "0";
 
 export default defineConfig({
   // Not a secret: it is only an identifier, and the API token is what authorizes.
@@ -44,7 +43,7 @@ export default defineConfig({
       htmlHandling: "auto-trailing-slash",
       notFoundHandling: "none",
       // Only these reach the Worker; every other path is a static file.
-      runWorkerFirst: ["/api/*", "/.well-known/jwks.json"],
+      runWorkerFirst: ["/api/*"],
     },
     exports: {
       KagiRoom: exports.durableObject({ storage: "sqlite" }),
@@ -54,12 +53,9 @@ export default defineConfig({
         worker: WORKER,
         exportName: "KagiRoom",
       }),
-      IDP_ORIGIN: bindings.text("https://id.kbn.one"),
-      // Must be in the IdP's AUTHORIZE_WHITELIST for the approval push to be accepted.
-      RP_ORIGIN: bindings.text("https://kagi.kbn.one"),
-      // Secret, generated and set by `web/server/set_signing_key.ts` (after the first deploy, and by
-      // the `signing-key` workflow to rotate); declared here so a deploy keeps it.
-      RP_SIGNING_KEY_JWK: hasSigningKey ? bindings.secret() : null,
+      // Secret, generated and set by `web/server/set_vapid_keys.ts` (by the deploy when missing, and
+      // by the `vapid-keys` workflow to rotate); declared here so a deploy keeps it.
+      VAPID_KEYS: hasVapidKeys ? bindings.secret() : null,
     },
   },
 });

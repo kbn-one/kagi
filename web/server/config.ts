@@ -16,44 +16,34 @@
 
 /** Environment as Cloudflare Workers passes it to `fetch(request, env)`. */
 export interface Env {
-  readonly IDP_ORIGIN?: string;
-  readonly RP_ORIGIN?: string;
-  readonly RP_SIGNING_KEY_JWK?: string;
+  readonly VAPID_KEYS?: string;
+  readonly PUSH_CONTACT?: string;
 }
 
 /** Parsed, typed configuration used across the server. */
 export interface Config {
-  /** Origin of the IdP (id.kbn.one). Mirrors the client's `IDP_ORIGIN`. */
-  readonly idpOrigin: string;
   /**
-   * This app's own public origin — the `clientId` / `iss` / `sub` of the
-   * `private_key_jwt` client assertion. Must be whitelisted on the IdP and be
-   * the origin it fetches `/.well-known/jwks.json` from. Empty until set; the
-   * push send path surfaces a clear error in that case.
+   * The VAPID key pair the approval push is signed with: JSON of `{ publicKey, privateKey }` JWKs
+   * (`exportVapidKeys` of `@remix-kbn/web-push`). Empty until set. Changing it makes every phone
+   * subscribe again (they do so by themselves the next time `/kagi` connects).
    */
-  readonly rpOrigin: string;
-  /**
-   * Optional ES256 private key (JWK JSON) for signing client assertions and
-   * publishing JWKS. When empty an ephemeral key is generated per process
-   * (fine for dev; set a fixed key in production).
-   */
-  readonly rpSigningKeyJwk: string;
+  readonly vapidKeys: string;
+  /** How a push service can reach us (RFC 8292 §2.1): a `mailto:` or `https:` URL. */
+  readonly pushContact: string;
 }
 
 /** Derive the typed {@link Config} from a raw host env record. */
 export function loadConfig(env: Env): Config {
   return {
-    idpOrigin: env.IDP_ORIGIN ?? "https://id.kbn.one",
-    rpOrigin: env.RP_ORIGIN ?? "",
-    rpSigningKeyJwk: env.RP_SIGNING_KEY_JWK ?? "",
+    vapidKeys: env.VAPID_KEYS ?? "",
+    pushContact: env.PUSH_CONTACT ?? "https://kagi.kbn.one",
   };
 }
 
 /** Keys read from the host environment. */
 const ENV_KEYS = [
-  "IDP_ORIGIN",
-  "RP_ORIGIN",
-  "RP_SIGNING_KEY_JWK",
+  "VAPID_KEYS",
+  "PUSH_CONTACT",
 ] as const;
 
 /**

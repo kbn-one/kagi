@@ -17,7 +17,6 @@ const DEVICE_KEY = "device";
 
 export interface Subscription {
   id: string;
-  userId: string;
   createdAt: number;
 }
 
@@ -58,10 +57,8 @@ async function idb<T>(
 const loadKeyPair = () =>
   idb<CryptoKeyPair | undefined>("readonly", (s) => s.get(DEVICE_KEY));
 
-/** Registers this phone as a new subscription for `userId`. */
-export async function createSubscription(
-  userId: string,
-): Promise<Subscription> {
+/** Registers this phone as a new subscription. */
+export async function createSubscription(): Promise<Subscription> {
   const keys = await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
     false,
@@ -76,12 +73,12 @@ export async function createSubscription(
   const res = await fetch(routes.api.sub.register.href({ id }), {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ userId, publicKey }),
+    body: JSON.stringify({ publicKey }),
   });
   if (!res.ok) throw new Error(await problemDetail(res));
 
   await idb("readwrite", (s) => s.put(keys, DEVICE_KEY));
-  const sub: Subscription = { id, userId, createdAt: Date.now() };
+  const sub: Subscription = { id, createdAt: Date.now() };
   localStorage.setItem(SUB_KEY, JSON.stringify(sub));
   return sub;
 }

@@ -37,10 +37,6 @@ export default function Docs(_handle: Handle) {
             はホーム画面から開かないと通知を受け取れない）。
           </li>
           <li>
-            <a href={routes.my.href()}>マイページ</a>{" "}
-            で id.kbn.one にサインインし、「このデバイスへの通知を登録」を押す。
-          </li>
-          <li>
             <a href={routes.kagi.href()}>承認</a>{" "}
             の画面で 「パスキーを作成」を押し、秘密を追加する。秘密は
             localStorage
@@ -49,7 +45,7 @@ export default function Docs(_handle: Handle) {
             ）を指定しておくと、別のホストへは送れなくなる。
           </li>
           <li>
-            同じ画面で「この端末を承認者として登録」を押す。表示される
+            同じ画面で「この端末を承認者として登録」を押し、続けて「通知を有効にする」を押して通知を許可する。表示される
             <code>{`${ORIGIN}/api/sub/<id>`}</code>{" "}
             がリクエスト用の URL。 この ID
             を知っていれば誰でもリクエストを送れるので、ID は秘密にしておく。

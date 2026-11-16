@@ -37,7 +37,6 @@
 
 import { css, type Handle, type RemixNode } from "@remix-run/component";
 
-import { NavAuth } from "./islands/nav_auth.tsx";
 import { routes } from "./routes.ts";
 import { color, contentWidth } from "./tokens.ts";
 
@@ -200,7 +199,6 @@ export function Shell(handle: Handle<ShellProps>) {
             <a href={routes.home.href()}>Home</a>
             <a href={routes.kagi.href()}>承認</a>
             <a href={routes.docs.href()}>使い方</a>
-            <NavAuth myHref={routes.my.href()} />
           </nav>
         </header>
         <main mix={[bandStyle, mainStyle]}>{handle.props.children}</main>

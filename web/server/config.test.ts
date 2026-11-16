@@ -10,20 +10,17 @@ import { loadConfig } from "./config.ts";
 
 Deno.test("loadConfig: env の値をそのまま反映する", () => {
   const config = loadConfig({
-    IDP_ORIGIN: "http://localhost:8000",
-    RP_ORIGIN: "https://rp.example.com",
-    RP_SIGNING_KEY_JWK: "{}",
+    VAPID_KEYS: "{}",
+    PUSH_CONTACT: "mailto:ops@example.com",
   });
   assertEquals(config, {
-    idpOrigin: "http://localhost:8000",
-    rpOrigin: "https://rp.example.com",
-    rpSigningKeyJwk: "{}",
+    vapidKeys: "{}",
+    pushContact: "mailto:ops@example.com",
   });
 });
 
 Deno.test("loadConfig: 空の env はデフォルトにフォールバックする", () => {
   const config = loadConfig({});
-  assertEquals(config.idpOrigin, "https://id.kbn.one");
-  assertEquals(config.rpOrigin, "");
-  assertEquals(config.rpSigningKeyJwk, "");
+  assertEquals(config.vapidKeys, "");
+  assertEquals(config.pushContact, "https://kagi.kbn.one");
 });

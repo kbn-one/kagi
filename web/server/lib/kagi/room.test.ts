@@ -6,6 +6,7 @@ import {
   type ServerMessage,
 } from "../../../client/lib/kagi/protocol.ts";
 import { createMemoryHub, type KagiHub } from "./hub.ts";
+import type { ApprovalPush, NotifyOutcome } from "./notify.ts";
 import { parseSubPath, PENDING_TTL_MS, type Upgrade } from "./room.ts";
 
 /** The server's half of a WebSocket, driven by the test as the phone. */
@@ -52,15 +53,18 @@ async function setup(now = () => Date.now()) {
       response: new Response(null, { status: 200 }),
     };
   };
+  /** `endpoint txId` of every push sent. */
   const notified: string[] = [];
-  const hub = createMemoryHub({
-    upgrade,
-    notify: (_reg, tx) => {
-      notified.push(tx.id);
-      return Promise.resolve(true);
+  /** What the push service answers next. */
+  const pushService: { outcome: NotifyOutcome } = { outcome: "sent" };
+  const push: ApprovalPush = {
+    applicationServerKey: () => Promise.resolve("BKEY"),
+    notify: (subscription, tx) => {
+      notified.push(`${subscription.endpoint} ${tx.id}`);
+      return Promise.resolve(pushService.outcome);
     },
-    now,
-  });
+  };
+  const hub = createMemoryHub({ upgrade, push, now });
   const keys = await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
     true,
@@ -72,7 +76,7 @@ async function setup(now = () => Date.now()) {
     "register",
     new Request(base, {
       method: "PUT",
-      body: JSON.stringify({ userId: "u1", publicKey }),
+      body: JSON.stringify({ publicKey }),
     }),
   );
   assertEquals(reg.status, 201);
@@ -97,7 +101,7 @@ async function setup(now = () => Date.now()) {
     socket.emit({ type: "auth", signature });
     return socket;
   };
-  return { hub, connect, notified };
+  return { hub, connect, notified, pushService };
 }
 
 const submit = (hub: KagiHub, body: unknown) =>
@@ -120,16 +124,31 @@ const ghRequest = {
   headers: { authorization: "Bearer [GH_SECRET]" },
 };
 
+const ready = (push = false): ServerMessage => ({
+  type: "ready",
+  transactions: [],
+  applicationServerKey: "BKEY",
+  push,
+});
+
+const subscription = (endpoint = "https://push.example/1") => ({
+  endpoint,
+  expirationTime: null,
+  keys: { p256dh: "p", auth: "a" },
+});
+
 Deno.test("approve → done → requester gets the result once", async () => {
   const { hub, connect, notified } = await setup();
   const phone = await connect();
-  assertEquals(await phone.next(), { type: "ready", transactions: [] });
+  assertEquals(await phone.next(), ready());
+  phone.emit({ type: "push", subscription: subscription() });
+  assertEquals(await phone.next(), { type: "push", registered: true });
 
   const res = await submit(hub, ghRequest);
   assertEquals(res.status, 202);
   const { transaction_id: txId, notified: pushed } = await res.json();
   assertEquals(pushed, true);
-  assertEquals(notified, [txId]);
+  assertEquals(notified, [`https://push.example/1 ${txId}`]);
 
   const announced = await phone.next();
   assert(announced.type === "tx");
@@ -271,7 +290,7 @@ Deno.test("requests are validated and unknown ids are 404", async () => {
     assert((await res.json()).detail.includes(fragment), fragment);
   }
 
-  const other = createMemoryHub({ notify: () => Promise.resolve(false) });
+  const other = createMemoryHub();
   const res = await other.dispatch(
     SUB,
     "req",
@@ -291,7 +310,6 @@ Deno.test("an id cannot be registered twice", async () => {
     new Request(base, {
       method: "PUT",
       body: JSON.stringify({
-        userId: "attacker",
         publicKey: { kty: "EC", crv: "P-256", x: "a", y: "b" },
       }),
     }),
@@ -310,4 +328,76 @@ Deno.test("parseSubPath reads the id and action off a URL", () => {
   });
   assertEquals(parseSubPath(`/api/sub/${SUB}`, "GET"), null);
   assertEquals(parseSubPath(`/api/sub/short/req`, "POST"), null);
+});
+
+Deno.test("without a push subscription a request is accepted but nobody is notified", async () => {
+  const { hub, notified } = await setup();
+  const res = await submit(hub, ghRequest);
+  assertEquals(res.status, 202);
+  assertEquals((await res.json()).notified, false);
+  assertEquals(notified, []);
+});
+
+Deno.test("the push subscription is replaced, validated, and survives a reconnect", async () => {
+  const { hub, connect, notified } = await setup();
+  const phone = await connect();
+  await phone.next(); // ready
+  phone.emit({ type: "push", subscription: subscription("http://plain/1") });
+  assertEquals((await phone.next()).type, "error");
+  phone.emit({
+    type: "push",
+    subscription: subscription("https://push.example/1"),
+  });
+  await phone.next();
+  phone.emit({
+    type: "push",
+    subscription: subscription("https://push.example/2"),
+  });
+  await phone.next();
+  phone.close();
+
+  assertEquals(await (await connect()).next(), ready(true));
+  const { transaction_id: txId } = await (await submit(hub, ghRequest)).json();
+  assertEquals(notified, [`https://push.example/2 ${txId}`]);
+});
+
+Deno.test("null turns the push off", async () => {
+  const { hub, connect, notified } = await setup();
+  const phone = await connect();
+  await phone.next();
+  phone.emit({ type: "push", subscription: subscription() });
+  await phone.next();
+  phone.emit({ type: "push", subscription: null });
+  assertEquals(await phone.next(), { type: "push", registered: false });
+  await submit(hub, ghRequest);
+  assertEquals(notified, []);
+});
+
+Deno.test("a subscription the push service says is gone is forgotten, and the phone is told", async () => {
+  const { hub, connect, notified, pushService } = await setup();
+  const phone = await connect();
+  await phone.next();
+  phone.emit({ type: "push", subscription: subscription() });
+  await phone.next();
+
+  pushService.outcome = "gone";
+  const res = await submit(hub, ghRequest);
+  assertEquals((await res.json()).notified, false);
+  assertEquals((await phone.next()).type, "tx");
+  assertEquals(await phone.next(), { type: "push", registered: false });
+
+  await submit(hub, ghRequest);
+  assertEquals(notified.length, 1);
+});
+
+Deno.test("a failed push keeps the subscription", async () => {
+  const { hub, connect, notified, pushService } = await setup();
+  const phone = await connect();
+  await phone.next();
+  phone.emit({ type: "push", subscription: subscription() });
+  await phone.next();
+  pushService.outcome = "failed";
+  assertEquals((await (await submit(hub, ghRequest)).json()).notified, false);
+  await submit(hub, ghRequest);
+  assertEquals(notified.length, 2);
 });

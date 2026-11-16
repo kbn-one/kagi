@@ -9,9 +9,9 @@
     "serve": "deno task --cwd web/server serve",
     "build": "deno task --cwd web/server build",
     "build:cf": "deno task --cwd web/server build:cf",
-    "set-signing-key": {
-      "description": "Generate the ES256 key and store it as the Worker secret RP_SIGNING_KEY_JWK (pass --rotate to replace one)",
-      "command": "deno task --cwd web/server set-signing-key"
+    "set-vapid-keys": {
+      "description": "Generate the VAPID key pair and store it as the Worker secret VAPID_KEYS (pass --rotate to replace one)",
+      "command": "deno task --cwd web/server set-vapid-keys"
     },
     "cf": "deno run -A npm:cf",
     "test": "deno test -P --ignore=web/tests",
@@ -27,7 +27,6 @@
       "read": true,
       "env": true,
       "net": [
-        "id.kbn.one",
         "localhost",
         "127.0.0.1"
       ],
@@ -56,10 +55,10 @@
   "imports": {
     "@cloudflare/build-output-utils": "npm:@cloudflare/build-output-utils@0.9.1",
     "@cloudflare/config": "npm:@cloudflare/config@0.25.0",
-    "@kuboon/dpop": "jsr:@kuboon/dpop@^0.1.2",
     "@lightpanda/browser": "npm:@lightpanda/browser@^1.6.0",
     "@remix-kbn/assets-deno": "jsr:@remix-kbn/assets-deno@^0.9.0",
     "@remix-kbn/ssg": "jsr:@remix-kbn/ssg@^0.13.0",
+    "@remix-kbn/web-push": "jsr:@remix-kbn/web-push@^0.1.0",
     "@remix-run/component": "npm:@remix-run/component@^1.2.0",
     "@remix-run/cop-middleware": "npm:@remix-run/cop-middleware@^1.0.0",
     "@remix-run/csp-middleware": "npm:@remix-run/csp-middleware@^1.0.0",
@@ -68,7 +67,6 @@
     "@std/assert": "jsr:@std/assert@^1.0.19",
     "canvaskit-wasm": "npm:canvaskit-wasm@^0.40.0",
     "cf": "npm:cf@1.0.0-beta.16",
-    "jose": "jsr:@panva/jose@^6.2.3",
     "puppeteer-core": "npm:puppeteer-core@^23.11.1"
   },
   "fmt": {

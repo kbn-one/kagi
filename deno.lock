@@ -2,6 +2,7 @@
   "version": "5",
   "specifiers": {
     "jsr:@deno/loader@0.5": "0.5.0",
+    "jsr:@kuboon/browser-how-to@0.2": "0.2.0",
     "jsr:@negrel/http-ece@0.7.0": "0.7.0",
     "jsr:@negrel/webpush@0.5": "0.5.0",
     "jsr:@remix-kbn/assets-deno@0.9": "0.9.0",
@@ -35,6 +36,9 @@
   "jsr": {
     "@deno/loader@0.5.0": {
       "integrity": "a6d94408de5e6bacac404f8f6963c8b8cc278cfd1a878aa2f06b34a083d6bfee"
+    },
+    "@kuboon/browser-how-to@0.2.0": {
+      "integrity": "c343ce539b82e74fd5085b6bafb1bc44f30cec60302d864b17d94927f66e5370"
     },
     "@negrel/http-ece@0.7.0": {
       "integrity": "068e61ba6f52da5454051a283cc19621607f8dd6e74d55c01bb365b8c6644076",
@@ -2135,6 +2139,7 @@
   },
   "workspace": {
     "dependencies": [
+      "jsr:@kuboon/browser-how-to@0.2",
       "jsr:@remix-kbn/assets-deno@0.9",
       "jsr:@remix-kbn/ssg@0.13",
       "jsr:@remix-kbn/web-push@0.1",

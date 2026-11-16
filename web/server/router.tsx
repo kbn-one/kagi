@@ -32,6 +32,7 @@ import { assets, assetsPath } from "./assets.ts";
 import { contentSecurityPolicy, nonceOf } from "./csp.ts";
 import { clientRuntime } from "./runtime.ts";
 import { ogImage, ogPaths, serveOgImage } from "./og/mod.ts";
+import { ICONS, manifest, serveIcon } from "./icon.ts";
 import { Layout, type PageModule } from "../client/layout.tsx";
 import { routes } from "../client/routes.ts";
 
@@ -125,6 +126,21 @@ router.get("/static/*path", ({ request }) => staticFiles.fetch(request));
 router.get(`${assetsPath}/*path`, ({ request }) => assets.fetch(request));
 router.get("/og/*path", ({ request }) => serveOgImage(request));
 router.get(
+  "/icons/*path",
+  async ({ request }) =>
+    (await serveIcon(request)) ?? new Response("Not Found", { status: 404 }),
+);
+router.get(
+  "/manifest.webmanifest",
+  () =>
+    new Response(JSON.stringify(manifest, null, 2), {
+      headers: {
+        "content-type": "application/manifest+json; charset=utf-8",
+        "cache-control": "no-cache",
+      },
+    }),
+);
+router.get(
   "/sw.js",
   () =>
     new Response(serviceWorker, {
@@ -140,10 +156,17 @@ router.get(
  * Where the static crawl starts.
  *
  * Pages are reached by following links from `/`. The exceptions are things nothing links to: the
- * social cards (an `og:image` is an absolute URL meant for someone else's server) and the service
- * worker (the push manager registers it by URL from script). `/api/*` is deliberately absent.
+ * social cards (an `og:image` is an absolute URL meant for someone else's server), the service
+ * worker (the push manager registers it by URL from script), and the web app manifest with its
+ * icons (a `<link>` in `<head>`, which the crawl does not follow). `/api/*` is deliberately absent.
  */
-export const entryPoints: readonly string[] = ["/", ...ogPaths(), "/sw.js"];
+export const entryPoints: readonly string[] = [
+  "/",
+  ...ogPaths(),
+  "/sw.js",
+  "/manifest.webmanifest",
+  ...Object.keys(ICONS),
+];
 
 /**
  * What `deno serve` (and the static build) calls.

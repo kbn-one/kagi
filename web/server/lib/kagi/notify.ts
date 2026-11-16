@@ -14,6 +14,7 @@ import {
   importVapidKeys,
   type PushSender,
   type PushSubscriptionData,
+  type SendResult,
 } from "@remix-kbn/web-push/server";
 
 import type { Transaction } from "../../../client/lib/kagi/protocol.ts";
@@ -32,6 +33,8 @@ export interface ApprovalPush {
     subscription: PushSubscriptionData,
     tx: Transaction,
   ): Promise<NotifyOutcome>;
+  /** The first push to a new subscription, so the approver sees that notifications arrive. */
+  confirm(subscription: PushSubscriptionData): Promise<NotifyOutcome>;
 }
 
 /** The approval page for a transaction. The service worker resolves it against its own origin. */
@@ -74,8 +77,24 @@ export const approvalPush: ApprovalPush = {
       requireInteraction: true,
       data: { txId: tx.id },
     }, { urgency: "high", ttl: 600 });
-    if (result.ok) return "sent";
-    console.error("kagi: push refused:", result.error.message);
-    return result.gone ? "gone" : "failed";
+    return outcome(result);
+  },
+  async confirm(subscription) {
+    const push = await pushSender();
+    if (!push) return "failed";
+    return outcome(
+      await push.send(subscription, {
+        title: "kagi: 通知が届きました",
+        body: "承認リクエストはこのように届きます。",
+        url: routes.kagi.href(),
+        tag: "kagi-confirm",
+      }, { urgency: "normal", ttl: 600 }),
+    );
   },
 };
+
+function outcome(result: SendResult): NotifyOutcome {
+  if (result.ok) return "sent";
+  console.error("kagi: push refused:", result.error.message);
+  return result.gone ? "gone" : "failed";
+}

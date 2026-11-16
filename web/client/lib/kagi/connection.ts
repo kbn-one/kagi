@@ -40,6 +40,8 @@ export interface KagiConnection {
   readonly transactions: Map<string, Transaction>;
   /** Unknown (null) until the connection is ready. */
   readonly push: PushState | null;
+  /** Resolves once the server has accepted the device key; rejects after `ms`. */
+  whenOnline(ms?: number): Promise<void>;
   /** Asks for notification permission (call it from a click) and starts the pushes. */
   enablePush(): Promise<void>;
   /** Stops the pushes to this phone. */
@@ -59,6 +61,7 @@ export function connect(
   const results = new Map<string, KagiResult>();
   let state: ConnectionState = "connecting";
   let applicationServerKey: string | null = null;
+  const onlineWaiters = new Set<() => void>();
   let pushStored = false;
   let socket: WebSocket | null = null;
   let closed = false;
@@ -109,6 +112,8 @@ export function connect(
             for (const t of m.transactions) transactions.set(t.id, t);
             applicationServerKey = m.applicationServerKey;
             pushStored = m.push;
+            for (const resolve of onlineWaiters) resolve();
+            onlineWaiters.clear();
             // Allowed before: refresh what the server has, without a prompt.
             if (
               applicationServerKey && isPushSupported() &&
@@ -179,6 +184,22 @@ export function connect(
     transactions,
     get push() {
       return pushState();
+    },
+    whenOnline(ms = 15_000) {
+      if (state === "online") return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          onlineWaiters.delete(done);
+          reject(
+            new Error("サーバーにつながりません。電波を確かめてください。"),
+          );
+        }, ms);
+        const done = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        onlineWaiters.add(done);
+      });
     },
     async enablePush() {
       await subscribe();

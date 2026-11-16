@@ -1,9 +1,13 @@
 /**
- * KagiApp — the approver's screen on `/kagi`.
+ * KagiApp — the approver's screen on `/kagi`, the home-screen app's start page.
  *
- * Three cards: the secrets (a passkey-sealed vault, `lib/kagi/vault.ts`), this phone's
- * subscription (`lib/kagi/device.ts`) with the endpoint a requester calls, and the requests waiting
- * for a decision, live over the subscription's WebSocket (`lib/kagi/connection.ts`).
+ * Until the phone is set up it walks through three steps, one screen each (`lib/kagi/setup.ts`):
+ * add to the home screen, turn notifications on (which also registers this phone as the approver,
+ * `lib/kagi/device.ts`), and create the passkey that seals the secrets (`lib/kagi/vault.ts`).
+ *
+ * Then it is the approver's screen: the requests waiting for a decision, live over the
+ * subscription's WebSocket (`lib/kagi/connection.ts`), and below them, folded away, the secrets,
+ * what a requester needs to know, and this phone's settings.
  *
  * Approving asks for the passkey every time: that unlocks the secrets, fills the request's
  * placeholders, makes the call from this browser, and keeps the (scrubbed) answer in memory until
@@ -28,11 +32,21 @@ import {
   primaryStyle,
 } from "../theme.ts";
 import { color, font, radius } from "../tokens.ts";
+import { showA2hsGuide } from "@kuboon/browser-how-to/a2hs/ui";
+import { showPasskeyGuide } from "@kuboon/browser-how-to/passkeys/ui";
+import { createPushGuide, showPushGuide } from "@kuboon/browser-how-to/push/ui";
 import {
-  connect,
-  type KagiConnection,
-  type PushState,
-} from "../lib/kagi/connection.ts";
+  browserModeChosen,
+  canUseBrowser,
+  chooseBrowserMode,
+  device,
+  forgetSetup,
+  installer,
+  markPushDone,
+  pushDone,
+  pushStatus,
+} from "../lib/kagi/setup.ts";
+import { connect, type KagiConnection } from "../lib/kagi/connection.ts";
 import {
   createSubscription,
   forgetSubscription,
@@ -113,6 +127,12 @@ export const KagiApp = clientEntry(
     let unlocked: UnlockedVault | null = null;
 
     let sub: Subscription | null = null;
+    /** Launched from the home screen. */
+    let standalone = false;
+    /** The approver chose to carry on in the browser (`setup.ts`). */
+    let browserMode = false;
+    /** Notifications have worked once on this phone. */
+    let pushOk = false;
     let connection: KagiConnection | null = null;
     const focusTx = isClientEnv
       ? new URL(location.href).searchParams.get("tx")
@@ -147,7 +167,15 @@ export const KagiApp = clientEntry(
 
     const startConnection = () => {
       connection?.close();
-      connection = sub ? connect(sub.id, () => handle.update()) : null;
+      connection = sub
+        ? connect(sub.id, () => {
+          if (!pushOk && connection?.push === "on") {
+            markPushDone();
+            pushOk = true;
+          }
+          handle.update();
+        })
+        : null;
     };
 
     if (isClientEnv) {
@@ -157,6 +185,9 @@ export const KagiApp = clientEntry(
         passkeys = passkeysAvailable();
         vaultExists = hasVault();
         sub = readSubscription();
+        standalone = device().isStandalone;
+        browserMode = browserModeChosen();
+        pushOk = pushDone();
         loaded = true;
         startConnection();
         handle.update();
@@ -175,7 +206,7 @@ export const KagiApp = clientEntry(
         unlocked = await createVault();
         vaultExists = true;
         setStatus(
-          "パスキーを作成しました。秘密を追加してください。",
+          "パスキーを作成しました。最初の秘密を追加してください。",
           "success",
         );
       });
@@ -290,15 +321,62 @@ export const KagiApp = clientEntry(
 
     // --- subscription ---------------------------------------------------------
 
-    const onSubscribe = () =>
+    const onInstall = () =>
       run(async () => {
-        sub = await createSubscription();
-        startConnection();
+        const a2hs = installer();
+        if (a2hs.getStatus().canPrompt) {
+          const outcome = await a2hs.promptInstall();
+          if (outcome === "accepted") {
+            setStatus(
+              "追加しました。ホーム画面の kagi から開いてください。",
+              "success",
+            );
+          }
+          return;
+        }
+        showA2hsGuide();
+      });
+
+    const onBrowserMode = () => {
+      chooseBrowserMode();
+      browserMode = true;
+      handle.update();
+    };
+
+    /**
+     * Registers this phone as the approver if it is not yet, and turns notifications on. One button,
+     * because a push subscription is stored with the registration, over its WebSocket.
+     */
+    const onSetupPush = () =>
+      run(async () => {
+        if (!sub) {
+          sub = await createSubscription();
+          startConnection();
+        }
+        const conn = connection;
+        if (!conn) return;
+        await conn.whenOnline();
+        try {
+          await conn.enablePush();
+        } catch (e) {
+          // Brave's push service is off by default; the guide says where to turn it on.
+          if (createPushGuide().isPushServiceError(e)) {
+            showPushGuide({ error: e });
+            return;
+          }
+          throw e;
+        }
         setStatus(
-          "この端末を承認者として登録しました。続けて通知を有効にしてください。",
+          "通知を有効にしました。確認の通知が届きます。",
           "success",
         );
       });
+
+    const onSkipPush = () => {
+      markPushDone();
+      pushOk = true;
+      handle.update();
+    };
 
     const onForget = () =>
       run(async () => {
@@ -310,14 +388,12 @@ export const KagiApp = clientEntry(
         connection?.close();
         connection = null;
         await forgetSubscription();
+        forgetSetup();
         sub = null;
+        pushOk = false;
       });
 
-    const onEnablePush = () =>
-      run(async () => {
-        await connection?.enablePush();
-        setStatus("通知を有効にしました。", "success");
-      });
+    const onEnablePush = onSetupPush;
 
     const onDisablePush = () =>
       run(async () => {
@@ -402,288 +478,444 @@ export const KagiApp = clientEntry(
     const endpoint = (path: string) =>
       isClientEnv ? new URL(path, location.href).href : path;
 
-    const secretsCard = () => (
-      <section mix={cardStyle}>
-        <h2>秘密</h2>
-        <p mix={mutedStyle}>
-          秘密はこのブラウザーの localStorage
-          に、パスキーで暗号化して保存します。 サーバーには送りません。
-        </p>
-        {!loaded && <p mix={mutedStyle} aria-busy="true">…</p>}
-        {loaded && !passkeys && (
-          <p mix={mutedStyle}>このブラウザーはパスキーに対応していません。</p>
-        )}
-        {loaded && !vaultExists && (
-          <div mix={rowStyle}>
-            <button
-              type="button"
-              disabled={busy}
-              mix={[actionStyle, primaryStyle, on("click", onCreateVault)]}
-            >
-              パスキーを作成
-            </button>
-          </div>
-        )}
-        {vaultExists && !unlocked && (
-          <div mix={rowStyle}>
-            <button
-              type="button"
-              disabled={busy}
-              mix={[actionStyle, primaryStyle, on("click", onUnlock)]}
-            >
-              パスキーで開いて編集
-            </button>
-            <button
-              type="button"
-              mix={[actionStyle, dangerStyle, on("click", onDeleteVault)]}
-            >
-              すべて削除
-            </button>
-          </div>
-        )}
-        {unlocked && (
-          <div>
-            <ul mix={listStyle}>
-              {Object.keys(unlocked.entries).length === 0 && (
-                <li mix={mutedStyle}>まだ秘密がありません。</li>
-              )}
-              {Object.entries(unlocked.entries).map(([name, entry]) => (
-                <li mix={[itemStyle, secretRowStyle]} key={name}>
-                  <code>[{name}]</code>
-                  <span mix={mutedStyle}>{describeSecret(entry)}</span>
+    // --- setup steps ------------------------------------------------------------
+
+    type Step = "install" | "push" | "vault";
+    const STEPS: { step: Step; label: string }[] = [
+      { step: "install", label: "ホーム画面" },
+      { step: "push", label: "通知" },
+      { step: "vault", label: "パスキー" },
+    ];
+
+    /** The setup step this phone is on, or null when it is set up. */
+    const currentStep = (): Step | null => {
+      if (!sub && !standalone && !browserMode) return "install";
+      if (!sub || !pushOk) return "push";
+      if (!vaultExists) return "vault";
+      return null;
+    };
+
+    const stepper = (current: Step) => (
+      <ol mix={stepperStyle} aria-label="準備">
+        {STEPS.map(({ step, label }, i) => (
+          <li
+            key={step}
+            aria-current={step === current ? "step" : undefined}
+            data-done={STEPS.findIndex((s) => s.step === current) > i
+              ? "1"
+              : undefined}
+          >
+            <span>{i + 1}</span>
+            {label}
+          </li>
+        ))}
+      </ol>
+    );
+
+    const installStep = () => {
+      const a2hs = installer().getStatus();
+      return (
+        <section mix={cardStyle}>
+          <h2>ホーム画面に追加する</h2>
+          <p>
+            kagi
+            はスマホのアプリとして使います。ホーム画面に追加して、そこから開いてください。
+          </p>
+          {a2hs.support === "in-app-blocked"
+            ? (
+              <>
+                <p mix={mutedStyle}>
+                  {a2hs.device.inApp.appLabel ?? "アプリ"}{" "}
+                  の中のブラウザーでは使えません。いつものブラウザーで開いてください。
+                </p>
+                <div mix={rowStyle}>
                   <button
                     type="button"
                     mix={[
                       actionStyle,
-                      dangerStyle,
-                      on("click", () =>
-                        void onRemoveSecret(name)),
+                      primaryStyle,
+                      on("click", () => void installer().escapeInAppBrowser()),
                     ]}
                   >
-                    削除
+                    ブラウザーで開く
                   </button>
-                </li>
-              ))}
-            </ul>
-            <div mix={formStyle}>
-              <input
-                placeholder="名前 (例: GH_SECRET)"
-                aria-label="秘密の名前"
-                autocomplete="off"
-                autocapitalize="characters"
-                mix={[
-                  inputStyle,
-                  ref((n) => (nameInput = n as HTMLInputElement)),
-                ]}
-              />
-              <input
-                type="password"
-                placeholder="値"
-                aria-label="秘密の値"
-                autocomplete="off"
-                mix={[
-                  inputStyle,
-                  ref((n) => (valueInput = n as HTMLInputElement)),
-                ]}
-              />
-              <input
-                placeholder="送信を許すホスト (例: api.github.com、空なら制限なし)"
-                aria-label="送信を許すホスト"
-                autocomplete="off"
-                autocapitalize="none"
-                mix={[
-                  inputStyle,
-                  ref((n) => (hostsInput = n as HTMLInputElement)),
-                ]}
-              />
-            </div>
-            <div mix={rowStyle}>
-              <button
-                type="button"
-                disabled={busy}
-                mix={[actionStyle, primaryStyle, on("click", onAddSecret)]}
-              >
-                追加して保存
-              </button>
-              <button type="button" mix={[actionStyle, on("click", onLock)]}>
-                閉じる
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                mix={[actionStyle, on("click", onCreateVault)]}
-              >
-                パスキーを作り直す
-              </button>
-            </div>
-
-            <h3>GitHub App を追加</h3>
+                </div>
+              </>
+            )
+            : a2hs.support === "installed"
+            ? (
+              <p mix={mutedStyle}>
+                追加済みです。ホーム画面の <strong>kagi</strong>{" "}
+                から開いてください。
+              </p>
+            )
+            : (
+              <div mix={rowStyle}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  mix={[actionStyle, primaryStyle, on("click", onInstall)]}
+                >
+                  {a2hs.canPrompt ? "ホーム画面に追加" : "追加のしかたを見る"}
+                </button>
+              </div>
+            )}
+          {canUseBrowser() && (
             <p mix={mutedStyle}>
-              App の秘密鍵はこの端末から出ません。リクエスト元には、指定された
-              リポジトリと権限だけに絞った 1 時間有効のトークンを、承認のたびに
-              発行して渡します。
-            </p>
-            <div mix={formStyle}>
-              <input
-                placeholder="名前 (例: GH_APP)"
-                aria-label="GitHub App の名前"
-                autocomplete="off"
-                autocapitalize="characters"
-                mix={[
-                  inputStyle,
-                  ref((n) => (appNameInput = n as HTMLInputElement)),
-                ]}
-              />
-              <input
-                placeholder="App ID または Client ID"
-                aria-label="GitHub App ID"
-                autocomplete="off"
-                autocapitalize="none"
-                mix={[
-                  inputStyle,
-                  ref((n) => (appIdInput = n as HTMLInputElement)),
-                ]}
-              />
-              <label mix={fileLabelStyle}>
-                <span>秘密鍵ファイル（.pem）を選ぶ</span>
-                <input
-                  type="file"
-                  aria-label="GitHub App の秘密鍵ファイル"
-                  mix={on("change", (event) => {
-                    void onPickKeyFile(event.currentTarget as HTMLInputElement);
-                  })}
-                />
-              </label>
-              <textarea
-                placeholder="または .pem の中身（-----BEGIN RSA PRIVATE KEY----- から END まで）を貼り付け"
-                aria-label="GitHub App の秘密鍵"
-                autocomplete="off"
-                autocapitalize="none"
-                spellcheck={false}
-                rows={4}
-                mix={[
-                  inputStyle,
-                  ref((n) => (appKeyInput = n as HTMLTextAreaElement)),
-                ]}
-              />
-            </div>
-            <div mix={rowStyle}>
               <button
                 type="button"
-                disabled={busy}
-                mix={[actionStyle, primaryStyle, on("click", onAddApp)]}
+                mix={[linkButtonStyle, on("click", onBrowserMode)]}
               >
-                GitHub App を保存
+                追加せずにこのブラウザーで続ける
               </button>
-            </div>
+            </p>
+          )}
+        </section>
+      );
+    };
+
+    const pushStep = () => {
+      const status = pushStatus();
+      const state = connection?.push ?? null;
+      return (
+        <section mix={cardStyle}>
+          <h2>通知を受け取る</h2>
+          <p>
+            リクエストが来たら、この端末に通知します。通知を開いて内容を確かめ、パスキーで承認します。
+          </p>
+          {status.support === "denied" || state === "denied"
+            ? (
+              <>
+                <p mix={mutedStyle}>
+                  通知がブロックされています。次の手順で許可してから、もう一度押してください。
+                </p>
+                <ol mix={stepsStyle}>
+                  {createPushGuide().getReenableSteps().map((step, i) => (
+                    <li key={i}>{step.text}</li>
+                  ))}
+                </ol>
+              </>
+            )
+            : status.support === "unsupported" || state === "unsupported"
+            ? (
+              <p mix={mutedStyle}>
+                このブラウザーは通知に対応していません。
+                <button
+                  type="button"
+                  mix={[
+                    linkButtonStyle,
+                    on("click", () => void showPushGuide()),
+                  ]}
+                >
+                  詳しく
+                </button>
+              </p>
+            )
+            : null}
+          {state === "unavailable" && (
+            <p mix={mutedStyle}>サーバーの通知がまだ設定されていません。</p>
+          )}
+          <div mix={rowStyle}>
+            <button
+              type="button"
+              disabled={busy}
+              mix={[actionStyle, primaryStyle, on("click", onSetupPush)]}
+            >
+              通知を有効にする
+            </button>
           </div>
+          {(state === "unsupported" || state === "unavailable") && (
+            <p mix={mutedStyle}>
+              <button
+                type="button"
+                mix={[linkButtonStyle, on("click", onSkipPush)]}
+              >
+                通知なしで続ける
+              </button>
+              （画面を開いている間だけリクエストが見えます）
+            </p>
+          )}
+        </section>
+      );
+    };
+
+    const vaultStep = () => (
+      <section mix={cardStyle}>
+        <h2>パスキーを作る</h2>
+        <p>
+          API
+          のトークンなどの秘密は、この端末の中にだけ、パスキーで暗号化して保存します。サーバーには送りません。承認のたびにパスキーで開きます。
+        </p>
+        {!passkeys && (
+          <p mix={mutedStyle}>
+            このブラウザーはパスキーに対応していないようです。
+            <button
+              type="button"
+              mix={[
+                linkButtonStyle,
+                on("click", () => void showPasskeyGuide()),
+              ]}
+            >
+              詳しく
+            </button>
+          </p>
         )}
+        <div mix={rowStyle}>
+          <button
+            type="button"
+            disabled={busy}
+            mix={[actionStyle, primaryStyle, on("click", onCreateVault)]}
+          >
+            パスキーを作成
+          </button>
+        </div>
       </section>
     );
 
-    const pushRow = (push: PushState | null) => {
-      if (!push) return null;
-      const text: Record<PushState, string> = {
-        on: "通知: オン",
-        off: "通知: オフ。リクエストが来ても知らせが届きません。",
-        denied:
-          "通知: ブラウザーの設定でブロックされています。サイトの設定から許可してください。",
-        unsupported:
-          "通知: このブラウザーでは使えません。iPhone はホーム画面に追加したアプリから開いてください。",
-        unavailable: "通知: サーバーの通知が設定されていません。",
-      };
+    // --- the approver's screen -------------------------------------------------
+
+    const statusLine = () => {
+      const state = connection?.state;
+      const push = connection?.push ?? null;
       return (
-        <div>
-          <p mix={push === "on" ? null : mutedStyle}>{text[push]}</p>
-          {(push === "on" || push === "off") && (
-            <div mix={rowStyle}>
-              {push === "off"
-                ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    mix={[actionStyle, primaryStyle, on("click", onEnablePush)]}
-                  >
-                    通知を有効にする
-                  </button>
-                )
-                : (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    mix={[actionStyle, on("click", onDisablePush)]}
-                  >
-                    通知を止める
-                  </button>
-                )}
-            </div>
+        <div mix={statusLineStyle}>
+          <span data-state={state}>
+            {state === "online"
+              ? "オンライン"
+              : state === "connecting"
+              ? "接続中…"
+              : "オフライン"}
+          </span>
+          {push && push !== "on" && (
+            <span>
+              {push === "denied"
+                ? "通知はブロック中"
+                : push === "off"
+                ? "通知オフ"
+                : "通知なし"} {push === "off" && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  mix={[linkButtonStyle, on("click", onEnablePush)]}
+                >
+                  有効にする
+                </button>
+              )}
+            </span>
           )}
         </div>
       );
     };
 
-    const subscriptionCard = () => {
-      return (
-        <section mix={cardStyle}>
-          <h2>承認者の登録</h2>
-          {!loaded && !sub && <p mix={mutedStyle} aria-busy="true">…</p>}
-          {loaded && !sub && (
-            <div>
-              <p mix={mutedStyle}>
-                リクエストが来たら、この端末に通知が届きます。 iPhone
-                はホーム画面に追加してから開いてください。
-              </p>
-              <div mix={rowStyle}>
+    const secretEditor = (unlocked: UnlockedVault) => (
+      <section mix={cardStyle}>
+        <h2>秘密</h2>
+        <div>
+          <ul mix={listStyle}>
+            {Object.keys(unlocked.entries).length === 0 && (
+              <li mix={mutedStyle}>まだ秘密がありません。</li>
+            )}
+            {Object.entries(unlocked.entries).map(([name, entry]) => (
+              <li mix={[itemStyle, secretRowStyle]} key={name}>
+                <code>[{name}]</code>
+                <span mix={mutedStyle}>{describeSecret(entry)}</span>
                 <button
                   type="button"
-                  disabled={busy}
-                  mix={[actionStyle, primaryStyle, on("click", onSubscribe)]}
+                  mix={[
+                    actionStyle,
+                    dangerStyle,
+                    on("click", () =>
+                      void onRemoveSecret(name)),
+                  ]}
                 >
-                  この端末を承認者として登録
+                  削除
                 </button>
-              </div>
-            </div>
-          )}
-          {sub && (
-            <div>
-              <p>
-                接続:{" "}
-                <strong>
-                  {connection?.state === "online"
-                    ? "オンライン"
-                    : connection?.state === "connecting"
-                    ? "接続中…"
-                    : "オフライン"}
-                </strong>
-              </p>
-              {pushRow(connection?.push ?? null)}
-              <p mix={mutedStyle}>
-                リクエスト元はこの URL を使います。ID を知っている人は誰でも
-                リクエストを送れるので、ID は秘密にしてください。
-              </p>
-              <pre mix={codeStyle}>{usage(endpoint, sub.id)}</pre>
-              <p mix={mutedStyle}>
-                git push を GitHub App で 1
-                リポジトリに絞るなら、エージェント側で:
-              </p>
-              <pre mix={codeStyle}>{gitHelperConfig(endpoint, sub.id)}</pre>
-              <p mix={mutedStyle}>
-                詳しくは <a href={routes.docs.href()}>使い方</a>。
-              </p>
-              <div mix={rowStyle}>
-                <button
-                  type="button"
-                  disabled={busy}
-                  mix={[actionStyle, dangerStyle, on("click", onForget)]}
-                >
-                  登録を解除
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
-      );
-    };
+              </li>
+            ))}
+          </ul>
+          <div mix={formStyle}>
+            <input
+              placeholder="名前 (例: GH_SECRET)"
+              aria-label="秘密の名前"
+              autocomplete="off"
+              autocapitalize="characters"
+              mix={[
+                inputStyle,
+                ref((n) => (nameInput = n as HTMLInputElement)),
+              ]}
+            />
+            <input
+              type="password"
+              placeholder="値"
+              aria-label="秘密の値"
+              autocomplete="off"
+              mix={[
+                inputStyle,
+                ref((n) => (valueInput = n as HTMLInputElement)),
+              ]}
+            />
+            <input
+              placeholder="送信を許すホスト (例: api.github.com、空なら制限なし)"
+              aria-label="送信を許すホスト"
+              autocomplete="off"
+              autocapitalize="none"
+              mix={[
+                inputStyle,
+                ref((n) => (hostsInput = n as HTMLInputElement)),
+              ]}
+            />
+          </div>
+          <div mix={rowStyle}>
+            <button
+              type="button"
+              disabled={busy}
+              mix={[actionStyle, primaryStyle, on("click", onAddSecret)]}
+            >
+              追加して保存
+            </button>
+            <button type="button" mix={[actionStyle, on("click", onLock)]}>
+              閉じる
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              mix={[actionStyle, on("click", onCreateVault)]}
+            >
+              パスキーを作り直す
+            </button>
+          </div>
+
+          <h3>GitHub App を追加</h3>
+          <p mix={mutedStyle}>
+            App の秘密鍵はこの端末から出ません。リクエスト元には、指定された
+            リポジトリと権限だけに絞った 1 時間有効のトークンを、承認のたびに
+            発行して渡します。
+          </p>
+          <div mix={formStyle}>
+            <input
+              placeholder="名前 (例: GH_APP)"
+              aria-label="GitHub App の名前"
+              autocomplete="off"
+              autocapitalize="characters"
+              mix={[
+                inputStyle,
+                ref((n) => (appNameInput = n as HTMLInputElement)),
+              ]}
+            />
+            <input
+              placeholder="App ID または Client ID"
+              aria-label="GitHub App ID"
+              autocomplete="off"
+              autocapitalize="none"
+              mix={[
+                inputStyle,
+                ref((n) => (appIdInput = n as HTMLInputElement)),
+              ]}
+            />
+            <label mix={fileLabelStyle}>
+              <span>秘密鍵ファイル（.pem）を選ぶ</span>
+              <input
+                type="file"
+                aria-label="GitHub App の秘密鍵ファイル"
+                mix={on("change", (event) => {
+                  void onPickKeyFile(event.currentTarget as HTMLInputElement);
+                })}
+              />
+            </label>
+            <textarea
+              placeholder="または .pem の中身（-----BEGIN RSA PRIVATE KEY----- から END まで）を貼り付け"
+              aria-label="GitHub App の秘密鍵"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck={false}
+              rows={4}
+              mix={[
+                inputStyle,
+                ref((n) => (appKeyInput = n as HTMLTextAreaElement)),
+              ]}
+            />
+          </div>
+          <div mix={rowStyle}>
+            <button
+              type="button"
+              disabled={busy}
+              mix={[actionStyle, primaryStyle, on("click", onAddApp)]}
+            >
+              GitHub App を保存
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+
+    const secretsSection = () => (
+      <details mix={foldStyle}>
+        <summary>秘密</summary>
+        <p mix={mutedStyle}>
+          この端末の中にだけ、パスキーで暗号化して保存しています。
+        </p>
+        <div mix={rowStyle}>
+          <button
+            type="button"
+            disabled={busy}
+            mix={[actionStyle, primaryStyle, on("click", onUnlock)]}
+          >
+            パスキーで開いて編集
+          </button>
+          <button
+            type="button"
+            mix={[actionStyle, dangerStyle, on("click", onDeleteVault)]}
+          >
+            すべて削除
+          </button>
+        </div>
+      </details>
+    );
+
+    const requesterSection = (id: string) => (
+      <details mix={foldStyle}>
+        <summary>リクエスト元の設定</summary>
+        <p mix={mutedStyle}>
+          リクエスト元はこの URL を使います。ID を知っている人は誰でも
+          リクエストを送れるので、ID は秘密にしてください。
+        </p>
+        <pre mix={codeStyle}>{usage(endpoint, id)}</pre>
+        <p mix={mutedStyle}>
+          git push を GitHub App で 1 リポジトリに絞るなら、エージェント側で:
+        </p>
+        <pre mix={codeStyle}>{gitHelperConfig(endpoint, id)}</pre>
+        <p mix={mutedStyle}>
+          詳しくは <a href={routes.docs.href()}>使い方</a>。
+        </p>
+      </details>
+    );
+
+    const deviceSection = () => (
+      <details mix={foldStyle}>
+        <summary>この端末</summary>
+        {connection?.push === "on" && (
+          <div mix={rowStyle}>
+            <span>通知: オン</span>
+            <button
+              type="button"
+              disabled={busy}
+              mix={[actionStyle, on("click", onDisablePush)]}
+            >
+              通知を止める
+            </button>
+          </div>
+        )}
+        <div mix={rowStyle}>
+          <button
+            type="button"
+            disabled={busy}
+            mix={[actionStyle, dangerStyle, on("click", onForget)]}
+          >
+            承認者の登録を解除
+          </button>
+        </div>
+      </details>
+    );
 
     const requestsCard = () => {
       if (!connection) return null;
@@ -693,8 +925,11 @@ export const KagiApp = clientEntry(
       return (
         <section mix={cardStyle}>
           <h2>リクエスト</h2>
+          {statusLine()}
           {txs.length === 0 && (
-            <p mix={mutedStyle}>承認待ちのリクエストはありません。</p>
+            <p mix={mutedStyle}>
+              承認待ちのリクエストはありません。来たら通知します。
+            </p>
           )}
           <ul mix={listStyle}>
             {txs.map((tx) => (
@@ -757,18 +992,32 @@ export const KagiApp = clientEntry(
       );
     };
 
-    return () => (
-      <div>
-        {status && (
-          <div role="alert" data-kind={status.kind} mix={alertStyle}>
-            <span>{status.message}</span>
-          </div>
-        )}
-        {requestsCard()}
-        {subscriptionCard()}
-        {secretsCard()}
-      </div>
-    );
+    return () => {
+      const step = loaded ? currentStep() : null;
+      return (
+        <div>
+          {step && stepper(step)}
+          {status && (
+            <div role="alert" data-kind={status.kind} mix={alertStyle}>
+              <span>{status.message}</span>
+            </div>
+          )}
+          {!loaded && <p mix={mutedStyle} aria-busy="true">…</p>}
+          {step === "install" && installStep()}
+          {step === "push" && pushStep()}
+          {step === "vault" && vaultStep()}
+          {unlocked && secretEditor(unlocked)}
+          {loaded && !step && sub && (
+            <>
+              {requestsCard()}
+              {!unlocked && secretsSection()}
+              {requesterSection(sub.id)}
+              {deviceSection()}
+            </>
+          )}
+        </div>
+      );
+    };
   },
 );
 
@@ -1016,4 +1265,81 @@ const rowStyle = css({
   alignItems: "center",
   gap: "0.5rem",
   marginBlock: "0.25rem",
+});
+
+const linkButtonStyle = css({
+  padding: 0,
+  border: "none",
+  background: "none",
+  color: color.accent,
+  font: "inherit",
+  textDecoration: "underline",
+  cursor: "pointer",
+});
+
+const stepsStyle = css({ paddingInlineStart: "1.25rem", lineHeight: 1.7 });
+
+const stepperStyle = css({
+  display: "flex",
+  gap: "0.5rem",
+  listStyle: "none",
+  padding: 0,
+  margin: "0 0 1rem",
+  fontSize: "0.85rem",
+  color: color.muted,
+  "& li": {
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    paddingBlockEnd: "0.4rem",
+    borderBottom: `3px solid ${color.border}`,
+  },
+  "& li span": {
+    display: "inline-grid",
+    placeItems: "center",
+    width: "1.4rem",
+    height: "1.4rem",
+    borderRadius: "999px",
+    background: color.border,
+    color: color.fg,
+    fontSize: "0.75rem",
+  },
+  "& li[data-done]": { borderColor: color.accent },
+  "& li[aria-current]": {
+    borderColor: color.accent,
+    color: color.fg,
+    fontWeight: 700,
+  },
+  "& li[aria-current] span, & li[data-done] span": {
+    background: color.accent,
+    color: color.onAccent,
+  },
+});
+
+const statusLineStyle = css({
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "0.75rem",
+  fontSize: "0.85rem",
+  color: color.muted,
+  "& [data-state]::before": {
+    content: '""',
+    display: "inline-block",
+    width: "0.55rem",
+    height: "0.55rem",
+    marginInlineEnd: "0.35rem",
+    borderRadius: "999px",
+    background: color.muted,
+  },
+  "& [data-state=online]::before": { background: "#16a34a" },
+});
+
+const foldStyle = css({
+  marginBlock: "0.75rem",
+  padding: "0.75rem 1rem",
+  border: `1px solid ${color.border}`,
+  borderRadius: radius.md,
+  "& summary": { cursor: "pointer", fontWeight: 600 },
+  "&[open] summary": { marginBlockEnd: "0.5rem" },
 });

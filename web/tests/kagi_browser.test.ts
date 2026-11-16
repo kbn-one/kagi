@@ -49,8 +49,8 @@ async function serveLightpanda(port: number) {
 }
 
 /**
- * `/kagi` hydrates without duplicating markup, and the approver island answers a click. lightpanda has no WebAuthn, so pressing
- * 「パスキーを作成」 must end in the island's own error alert — which only a hydrated island can show.
+ * `/kagi` hydrates without duplicating markup, walks a new phone through the setup steps, and
+ * answers a click.
  */
 Deno.test({
   name: "lightpanda: /kagi の island が hydrate されクリックに応答する",
@@ -85,6 +85,39 @@ Deno.test({
           "承認",
         );
 
+        const ready = () =>
+          page.waitForFunction("globalThis.__rmxReady === true", {
+            timeout: 10_000,
+          });
+        const waitForText = (text: string) =>
+          page.waitForFunction(
+            (t: string) => document.body.textContent?.includes(t) ?? false,
+            { timeout: 5_000 },
+            text,
+          );
+        const labels = () =>
+          page.$$eval(
+            "button",
+            (buttons) => buttons.map((b) => b.textContent?.trim() ?? ""),
+          );
+
+        // A new phone opened in the browser starts at the first step: the home screen.
+        await waitForText("ホーム画面に追加する");
+
+        // Past the first two steps (chosen to stay in the browser, notifications done), the third
+        // is the passkey. lightpanda has no WebAuthn, so pressing 「パスキーを作成」 must end in the
+        // island's own error alert — which only a hydrated island can show.
+        await page.evaluate(() => {
+          localStorage.setItem("kagi.browserMode", "1");
+          localStorage.setItem("kagi.pushDone", "1");
+          localStorage.setItem(
+            "kagi.sub",
+            JSON.stringify({ id: "abcdefghijklmnopqrstuv", createdAt: 0 }),
+          );
+        });
+        await page.goto(`http://127.0.0.1:${appPort}/kagi`);
+        await ready();
+        await waitForText("パスキーを作る");
         await page.$$eval("button", (buttons) => {
           const create = buttons.find((b) =>
             b.textContent?.includes("パスキーを作成")
@@ -92,25 +125,18 @@ Deno.test({
           if (!create) throw new Error("no パスキーを作成 button");
           (create as HTMLButtonElement).click();
         });
-
         await page.waitForFunction(
           () => document.querySelector('[role="alert"]') !== null,
           { timeout: 5_000 },
         );
-
         // Hydration must not duplicate the server's markup: one button per action.
-        const labels = () =>
-          page.$$eval(
-            "button",
-            (buttons) => buttons.map((b) => b.textContent?.trim() ?? ""),
-          );
         assertEquals(
           (await labels()).filter((l) => l === "パスキーを作成").length,
           1,
         );
 
-        // A returning approver has a vault in localStorage, which the server cannot see. After a
-        // reload the island must show the unlock action — once — and not the create action.
+        // Set up (a vault in localStorage, which the server cannot see): the approver's screen, with
+        // the unlock action — once — and no create action.
         await page.evaluate(() =>
           localStorage.setItem(
             "kagi.vault",
@@ -124,16 +150,8 @@ Deno.test({
           )
         );
         await page.goto(`http://127.0.0.1:${appPort}/kagi`);
-        await page.waitForFunction("globalThis.__rmxReady === true", {
-          timeout: 10_000,
-        });
-        await page.waitForFunction(
-          () =>
-            [...document.querySelectorAll("button")].some((b) =>
-              b.textContent?.includes("パスキーで開いて編集")
-            ),
-          { timeout: 5_000 },
-        );
+        await ready();
+        await waitForText("リクエスト元の設定");
         const after = await labels();
         assertEquals(
           after.filter((l) => l === "パスキーで開いて編集").length,

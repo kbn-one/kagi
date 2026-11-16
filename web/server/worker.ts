@@ -2,9 +2,11 @@
  * The Cloudflare Workers entry: the server-only half of the app.
  *
  * Cloudflare serves the static build (`web/dist`, from `deno task build`) as Workers static assets
- * — the pages, the client chunks, the social cards, `sw.js`. `cloudflare.config.ts` sends only the
- * routes below to this Worker (`assets.runWorkerFirst`), so it never renders a page and needs none
- * of the Deno-only machinery in `router.tsx` (`Deno.bundle`, `Deno.readTextFile`, the file tree).
+ * — the client chunks, the social cards, `sw.js`, the icons — straight to the browser. The API and
+ * the pages reach this Worker first (`assets.runWorkerFirst` in `cloudflare.config.ts`): the API is
+ * answered below, and a page is fetched from the assets and given this request's CSP nonce
+ * (`pages.ts`). It never renders a page itself, so it needs none of the Deno-only machinery in
+ * `router.tsx` (`Deno.bundle`, `Deno.readTextFile`, the file tree).
  *
  * `deno task build:worker` bundles this file into `web/worker-dist/worker.js`.
  */
@@ -19,6 +21,7 @@ import {
   useDurableObjects,
 } from "./lib/kagi/hub.ts";
 import { copDenied, problem } from "./lib/problem.ts";
+import { type AssetsLike, createPagesRouter } from "./pages.ts";
 
 /** The Durable Object class behind `KAGI_ROOM`; `cloudflare.config.ts` declares it. */
 export { KagiRoom } from "./lib/kagi/durable_object.ts";
@@ -37,9 +40,12 @@ router.map(routes.api.sub, subController as never);
 
 interface WorkerEnv {
   KAGI_ROOM?: DurableObjectNamespaceLike;
+  ASSETS?: AssetsLike;
 }
 
 let boundDurableObjects = false;
+let pages: ReturnType<typeof createPagesRouter> | undefined;
+let pagesAssets: AssetsLike | undefined;
 
 export default {
   fetch(request: Request, env?: WorkerEnv) {
@@ -48,6 +54,14 @@ export default {
       useDurableObjects(env.KAGI_ROOM);
       boundDurableObjects = true;
     }
-    return router.fetch(request);
+    if (new URL(request.url).pathname.startsWith("/api/")) {
+      return router.fetch(request);
+    }
+    // Everything else that reaches the Worker is a page (`runWorkerFirst`): see `pages.ts`.
+    if (!pages || pagesAssets !== env?.ASSETS) {
+      pages = createPagesRouter(env?.ASSETS);
+      pagesAssets = env?.ASSETS;
+    }
+    return pages.fetch(request);
   },
 };

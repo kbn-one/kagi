@@ -1,0 +1,33 @@
+# Generates the VAPID key pair for the approval push and stores it as the Worker secret VAPID_KEYS
+# (web/server/set_vapid_keys.ts). The private key never reaches the log; the run prints only the
+# public key.
+#
+# The deploy (cloudflare.yml) already sets the key when the Worker has none, so this is for rotation:
+# Actions → vapid-keys → Run workflow with `rotate` checked. Without `rotate` it refuses to replace
+# an existing key. After a rotation each phone gets pushes again once it has opened /kagi.
+name: vapid-keys
+
+on:
+  workflow_dispatch:
+    inputs:
+      rotate:
+        description: Replace the existing key
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  set:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno task set-vapid-keys ${{ inputs.rotate && '--rotate' || '' }}
+        timeout-minutes: 3
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

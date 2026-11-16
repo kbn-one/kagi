@@ -8,7 +8,7 @@
  */
 
 import { problem } from "../problem.ts";
-import { notifyApprover } from "./notify.ts";
+import { approvalPush } from "./notify.ts";
 import { parseSubPath, Room, type RoomStorage } from "./room.ts";
 import { upgradeWebSocket } from "./upgrade.ts";
 
@@ -30,7 +30,7 @@ export class KagiRoom {
     this.#room ??= new Room(target.subId, {
       storage: this.#state.storage,
       upgrade: upgradeWebSocket,
-      notify: notifyApprover,
+      push: approvalPush,
     });
     return this.#room.handle(request, target.action);
   }

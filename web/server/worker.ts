@@ -14,7 +14,6 @@ import { createRouter } from "@remix-run/fetch-router";
 
 import { routes } from "../client/routes.ts";
 import { subController } from "./controllers/api/sub.ts";
-import { jwksAction } from "./controllers/well_known.ts";
 import {
   type DurableObjectNamespaceLike,
   useDurableObjects,
@@ -34,7 +33,6 @@ const router = createRouter({
   defaultHandler: () => problem({ status: 404 }),
 });
 
-router.get(routes.jwks, jwksAction.handler as never);
 router.map(routes.api.sub, subController as never);
 
 interface WorkerEnv {

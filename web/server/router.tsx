@@ -8,8 +8,8 @@
  *
  * It is used two ways:
  *
- * - **Locally** `deno serve router.tsx` answers the pages *and* the server-only routes (`/api/*`,
- *   `/.well-known/jwks.json`) live. This is also what the tests run against.
+ * - **Locally** `deno serve router.tsx` answers the pages *and* the server-only routes (`/api/*`)
+ *   live. This is also what the tests run against.
  * - **The static build** (`deno task build`, `@remix-kbn/ssg`) crawls this same object with
  *   `fetch()` and writes each page to `web/dist`, which Cloudflare serves as static assets. It
  *   starts from `entryPoints` and follows links, and nothing links to the server-only routes, so
@@ -25,6 +25,7 @@ import {
 import { cop } from "@remix-run/cop-middleware";
 import { render } from "@remix-run/render-middleware";
 import { createFileTree, githubPages } from "@remix-kbn/ssg/site";
+import { pushServiceWorkerScript } from "@remix-kbn/web-push/sw";
 import type { FileServerBehavior } from "@remix-kbn/ssg/site";
 
 import { assets, assetsPath } from "./assets.ts";
@@ -37,10 +38,8 @@ import { routes } from "../client/routes.ts";
 import * as Home from "../client/pages/index.tsx";
 import * as Docs from "../client/pages/docs.tsx";
 import * as Kagi from "../client/pages/kagi.tsx";
-import * as My from "../client/pages/my.tsx";
 
 import { subController } from "./controllers/api/sub.ts";
-import { jwksAction } from "./controllers/well_known.ts";
 import { kagiHub } from "./lib/kagi/hub.ts";
 import { parseSubPath } from "./lib/kagi/room.ts";
 import { copDenied } from "./lib/problem.ts";
@@ -80,14 +79,13 @@ const staticFiles = await createFileTree({
 });
 
 /**
- * The service worker, from `client/sw.js`.
+ * The service worker: `@remix-kbn/web-push`'s, which shows the approval push and opens `/kagi` on a
+ * click.
  *
  * It is a route of its own rather than a file under `static/` because a worker's scope is the
  * directory it is served from: `/static/sw.js` could only control `/static/`.
  */
-const serviceWorker = await Deno.readTextFile(
-  new URL("../client/sw.js", import.meta.url),
-);
+const serviceWorker = pushServiceWorkerScript({ defaultTitle: "kagi" });
 
 /**
  * `cop()` rejects unsafe cross-origin browser requests by `Sec-Fetch-Site` / `Origin`, without
@@ -111,14 +109,12 @@ declare module "@remix-run/fetch-router" {
   }
 }
 
-/** The pages, and the JWKS document. `routes.api` is a map, so it is mapped separately below. */
+/** The pages. `routes.api` is a map, so it is mapped separately below. */
 const top = createController(routes, {
   actions: {
     home: pageAction(routes.home, Home),
     kagi: pageAction(routes.kagi, Kagi),
     docs: pageAction(routes.docs, Docs),
-    my: pageAction(routes.my, My),
-    jwks: jwksAction,
   },
 });
 

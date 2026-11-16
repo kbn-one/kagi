@@ -12,7 +12,7 @@
       ],
       "command": "deno run -A cf_build.ts"
     },
-    "set-signing-key": "deno run --allow-net=api.cloudflare.com --allow-env --allow-read=../.. set_signing_key.ts",
+    "set-vapid-keys": "deno run --allow-net=api.cloudflare.com --allow-env --allow-read=../.. set_vapid_keys.ts",
     "check": "deno check ."
   },
   "permissions": {
@@ -28,9 +28,8 @@
         "ignore": [
           "NODE_ENV",
           "VSCODE_TEXTMATE_DEBUG",
-          "IDP_ORIGIN",
-          "RP_ORIGIN",
-          "RP_SIGNING_KEY_JWK"
+          "VAPID_KEYS",
+          "PUSH_CONTACT"
         ]
       },
       "import": true
@@ -42,9 +41,8 @@
       "env": {
         "allow": [
           "PORT",
-          "IDP_ORIGIN",
-          "RP_ORIGIN",
-          "RP_SIGNING_KEY_JWK"
+          "VAPID_KEYS",
+          "PUSH_CONTACT"
         ],
         "ignore": [
           "NODE_ENV",
@@ -54,8 +52,7 @@
       "net": [
         "0.0.0.0",
         "127.0.0.1",
-        "localhost",
-        "id.kbn.one"
+        "localhost"
       ],
       "import": true
     }

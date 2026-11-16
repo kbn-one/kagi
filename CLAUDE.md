@@ -37,50 +37,40 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   helper。 `useHttpPath` で push
   先のリポジトリ名を受け取り、それだけのトークンを頼む）。 App の設定手順は
   `README.md`。
-- 通知は既存の id.kbn.one 連携（`server/lib/push/client.ts`）で承認者の userId
-  へ送る。`RP_ORIGIN`（`https://kagi.kbn.one`）を IdP の `AUTHORIZE_WHITELIST`
-  に入れ、Worker secret の `RP_SIGNING_KEY_JWK` を設定しておく。
+- 通知はこのサーバーが自分で送る（下の「プッシュ通知」）。サインインは無い。
 - 既知の制約: `:id` を知る人は誰でもリクエストを送れる（承認者が拒否できる
-  だけ）。`PUT /api/sub/:id` の userId は IdP で検証していない（他人の userId
-  を登録すると、その人に通知が届きうる）。呼び先 API は CORS
-  でこのオリジンを許可している必要がある。
+  だけ）。呼び先 API は CORS でこのオリジンを許可している必要がある。
 
 ## 構造
 
 - `web/client/` — ブラウザに渡るもの全て (routes / pages / islands / layout /
   static / lib)。`deno.ns` 無しで型チェックされる。`Deno.` を参照しない。
-  - ページは `/`、`/kagi`（承認者の画面）、`/my`（id.kbn.one サインインと push
-    登録）。
+  - ページは `/`、`/kagi`（承認者の画面）、`/docs`（使い方）。
 - `web/server/` — router・asset bundler・API・config・og 画像・Worker。
   - `router.tsx` — ローカル (`deno serve`)・テスト・静的ビルドが使う唯一の
     ルーター定義。
-  - `worker.ts` — Cloudflare の Worker。`/api/*` と `/.well-known/jwks.json`
-    だけを答える（他は static assets）。API を足したらここにも配線する。
+  - `worker.ts` — Cloudflare の Worker。`/api/*` だけを答える（他は static
+    assets）。API を足したらここにも配線する。
 - `web/tests/` — lightpanda によるブラウザ smoke（`deno task test:browser`）。
 
-## プッシュ通知 (id.kbn.one 連携)
+## プッシュ通知
 
-id.kbn.one を Web Push のバックエンドとして使う。購読情報は IdP が保持し、RP
-(このアプリ) は購読 UI（`/my`）と送信だけを持つ。
+Web Push は `jsr:@remix-kbn/web-push`（id.kbn.one と共通）で、このサーバーが
+自分の VAPID 鍵で送る。id.kbn.one には依存しない。
 
-- ブラウザ側 (`web/client/lib/push/`, `web/client/islands/push_card.tsx`,
-  `web/client/sw.js`):
-  - `/sw.js` をこのオリジンに登録し push を受信 (`router.tsx`
-    の専用ルートが配信。scope を `/` にするため `static/` 配下には置かない)。
-  - 購読の取得/登録/改名/削除/テストは DPoP-bound fetch で IdP の
-    `${IDP_ORIGIN}/push/*` を直接叩く (cross-origin)。VAPID 公開鍵も IdP
-    のもの。
-- サーバ側 (`web/server/lib/push/client.ts`, `lib/signing-key.ts`):
-  - 承認リクエストが来ると `lib/kagi/notify.ts` が通知を送る。RP は ES256 鍵で
-    `private_key_jwt` クライアントアサーション ([RFC 7521]/[RFC 7523]) を作り、
-    IdP の `POST /rp/notifications` へ送信する。
-  - `GET /.well-known/jwks.json` で RP の公開鍵を配布し、IdP
-    がアサーションを検証 する (共通鍵不要。IdP は RP の JWKS を取得するだけ)。
-  - RP の `clientId` はこのアプリの origin (`RP_ORIGIN`) で、IdP の
-    `AUTHORIZE_WHITELIST` に含まれている必要がある。
-
-[RFC 7521]: https://www.rfc-editor.org/rfc/rfc7521
-[RFC 7523]: https://www.rfc-editor.org/rfc/rfc7523
+- 購読は subscription の登録に付けて Room（Durable Object）に置く
+  （`Registration.push`）。スマホが認証済みの WebSocket で
+  `{ type: "push", subscription }` を送って入れ替える（null で止める）。 `ready`
+  メッセージが VAPID 公開鍵と、購読が保存済みかを返す。
+- スマホ側（`lib/kagi/connection.ts`）は通知が許可済みなら接続のたびに
+  `subscribePush` して送り直す（鍵が変わっていれば作り直される）。なので購読の
+  失効や鍵のローテートは、スマホが `/kagi` を開けば自動で直る。未許可なら
+  `/kagi` の「通知を有効にする」ボタン。
+- 送信は `lib/kagi/notify.ts`。push サービスが購読の失効（404/410・VAPID
+  不一致）を返したら Room が購読を消し、スマホに
+  `{ type: "push", registered: false }` を伝える。
+- `/sw.js` は `router.tsx` が `pushServiceWorkerScript()` を配信する（scope を
+  `/` にするため `static/` 配下には置かない）。
 
 ## 環境変数
 
@@ -88,18 +78,15 @@ env アクセスは `web/server/config.ts` に集約し、ホスト非依存に�
 `getConfig()` が Deno では `Deno.env`、Cloudflare Workers では
 `cloudflare:workers` の `env`（動的 `import()`）から起動時に一度だけ読む。
 
-- `IDP_ORIGIN` — 外部 IdP の origin（既定 `https://id.kbn.one`）。
-- `RP_ORIGIN` — このアプリの公開 origin（`https://kagi.kbn.one`）。
-  クライアントアサーションの `clientId`/`iss`/`sub`。未設定だと通知送信が
-  エラーになる（リクエスト自体は受け付け、`notified: false` を返す）。
-- `RP_SIGNING_KEY_JWK` — ES256 秘密鍵 (JWK JSON)。未設定ならプロセス毎に生成
-  （開発用）。本番は Worker secret
-  に固定鍵を置く。`web/server/set_signing_key.ts` が鍵を生成して Cloudflare API
-  で直接 secret に入れる（鍵はログにもコマンド行 にも出ず、`kid`
-  だけを表示）。デプロイ（`cloudflare.yml`）が鍵の有無を先に調べ、 無ければ
-  `cloudflare.config.ts` は secret を宣言せずにデプロイし（初回デプロイは
-  継承元の版が無いので宣言すると失敗する）、直後に鍵を入れる。ローテートは
-  Actions の `signing-key` ワークフローを `rotate` 付きで手動実行する。
+- `VAPID_KEYS` — Web Push の VAPID 鍵ペア（`{ publicKey, privateKey }` の JWK
+  JSON）。未設定なら Deno ではプロセス毎に生成（開発用）、Worker では通知を
+  送らない。本番は Worker secret。`web/server/set_vapid_keys.ts` が鍵を生成して
+  Cloudflare API で直接 secret に入れる（秘密鍵はログにもコマンド行にも出ず、
+  公開鍵だけを表示）。デプロイ（`cloudflare.yml`）が鍵の有無を先に調べ、無ければ
+  `cloudflare.config.ts` は secret を宣言せずにデプロイし（継承元の版に無い
+  secret を宣言すると失敗する）、直後に鍵を入れる。ローテートは Actions の
+  `vapid-keys` ワークフローを `rotate` 付きで手動実行する。
+- `PUSH_CONTACT` — VAPID の連絡先（既定 `https://kagi.kbn.one`）。
 
 ## API のエラー応答 (RFC 9457)
 

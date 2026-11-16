@@ -7,7 +7,7 @@
  *   process's worth of state: fine locally, lost on restart.
  */
 
-import { notifyApprover } from "./notify.ts";
+import { approvalPush } from "./notify.ts";
 import { MemoryStorage, Room, type RoomAction, type RoomDeps } from "./room.ts";
 import { upgradeWebSocket } from "./upgrade.ts";
 
@@ -37,7 +37,7 @@ export function createMemoryHub(
         room = new Room(subId, {
           storage: new MemoryStorage(),
           upgrade: deps.upgrade ?? upgradeWebSocket,
-          notify: deps.notify ?? notifyApprover,
+          push: deps.push ?? approvalPush,
           now: deps.now,
         });
         rooms.set(subId, room);

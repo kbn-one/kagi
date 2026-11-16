@@ -131,8 +131,18 @@ export interface Transaction {
 export type ServerMessage =
   /** First message on every connection: sign it to prove you hold the device key. */
   | { type: "challenge"; nonce: string }
-  /** After a good `auth`: every transaction that is not final yet. */
-  | { type: "ready"; transactions: Transaction[] }
+  /**
+   * After a good `auth`: every transaction that is not final yet, the key to subscribe to push with
+   * (null when the server sends none), and whether this subscription has a push subscription stored.
+   */
+  | {
+    type: "ready";
+    transactions: Transaction[];
+    applicationServerKey: string | null;
+    push: boolean;
+  }
+  /** Answer to a `push` message, or the stored push subscription was found dead. */
+  | { type: "push"; registered: boolean }
   /** A new transaction, or a change to one. */
   | { type: "tx"; transaction: Transaction }
   /** The requester is waiting: send the result of `txId`. */
@@ -146,7 +156,18 @@ export type ClientMessage =
   /** The call finished. The result itself stays on the phone until a `get`. */
   | { type: "done"; txId: string }
   /** Answer to a `get` (or a failure, any time). */
-  | { type: "result"; txId: string; result?: KagiResult; error?: string };
+  | { type: "result"; txId: string; result?: KagiResult; error?: string }
+  /**
+   * Where to push this approver (`PushSubscription.toJSON()`), replacing what was stored; null
+   * stops the pushes.
+   */
+  | { type: "push"; subscription: PushSubscriptionJson | null };
+
+/** A push subscription as the browser's `PushSubscription.toJSON()` gives it. */
+export interface PushSubscriptionJson {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
 
 /** What the approver's device key signs to authenticate a WebSocket. */
 export const challengeMessage = (subId: string, nonce: string): string =>

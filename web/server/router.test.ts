@@ -9,19 +9,11 @@ Deno.test("GET / returns the shell with nav links and the runtime script", async
   assertStringIncludes(html, "<!DOCTYPE html>");
   assertStringIncludes(html, "<h1>kagi</h1>");
   assertStringIncludes(html, 'href="/kagi"');
-  assertStringIncludes(html, 'href="/my"');
+  assertStringIncludes(html, 'href="/docs"');
+  assert(!html.includes('href="/my"'));
   assertStringIncludes(html, '<script type="module" src="/assets/hydration');
   // Soft navigation is the runtime's default now; no frame target attributes.
   assert(!html.includes("rmx-target"));
-});
-
-Deno.test("GET /my embeds idp-origin meta and links to the approver screen", async () => {
-  const res = await router.fetch(new Request("http://x/my"));
-  assertEquals(res.status, 200);
-  const html = await res.text();
-  assertStringIncludes(html, '<meta name="idp-origin"');
-  assertStringIncludes(html, "https://id.kbn.one");
-  assertStringIncludes(html, 'href="/kagi"');
 });
 
 Deno.test("og:image is absolute on the deployed origin", async () => {
@@ -41,20 +33,13 @@ Deno.test("GET /sw.js serves the worker with a root scope", async () => {
   assertEquals(res.status, 200);
   assertStringIncludes(res.headers.get("content-type") ?? "", "javascript");
   assertEquals(res.headers.get("service-worker-allowed"), "/");
-  assertStringIncludes(await res.text(), "addEventListener");
-});
-
-Deno.test("GET /.well-known/jwks.json publishes the RP key", async () => {
-  const res = await router.fetch(
-    new Request("http://x/.well-known/jwks.json"),
-  );
-  assertEquals(res.status, 200);
-  const body = await res.json() as { keys: { kty: string }[] };
-  assertEquals(body.keys[0].kty, "EC");
+  const script = await res.text();
+  assertStringIncludes(script, "@remix-kbn/web-push");
+  assertStringIncludes(script, '"defaultTitle":"kagi"');
 });
 
 Deno.test("HTML responses carry a nonce-based CSP, and every executable tag has the nonce", async () => {
-  for (const path of ["/", "/kagi", "/my"]) {
+  for (const path of ["/", "/kagi", "/docs"]) {
     const res = await router.fetch(new Request(`http://x${path}`));
     const policy = res.headers.get("content-security-policy") ?? "";
     const nonce = policy.match(/'nonce-([^']+)'/)?.[1];

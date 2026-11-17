@@ -80,11 +80,6 @@ Deno.test({
           timeout: 10_000,
         });
 
-        assertEquals(
-          await page.$eval("main h1", (el) => el.textContent?.trim()),
-          "承認",
-        );
-
         const ready = () =>
           page.waitForFunction("globalThis.__rmxReady === true", {
             timeout: 10_000,
@@ -103,6 +98,10 @@ Deno.test({
 
         // A new phone opened in the browser starts at the first step: the home screen.
         await waitForText("ホーム画面に追加する");
+        assertEquals(
+          await page.$eval("main h1", (el) => el.textContent?.trim()),
+          "はじめる",
+        );
 
         // Past the first two steps (chosen to stay in the browser, notifications done), the third
         // is the passkey. lightpanda has no WebAuthn, so pressing 「パスキーを作成」 must end in the

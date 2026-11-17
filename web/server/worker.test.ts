@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import worker from "./worker.ts";
 import { setKagiHub } from "./lib/kagi/hub.ts";
 
@@ -19,8 +19,61 @@ Deno.test("worker no longer serves a JWKS (no IdP to verify us)", async () => {
   await assertProblem(await get("/.well-known/jwks.json"), 404);
 });
 
-Deno.test("worker does not render pages (static assets answer those)", async () => {
+Deno.test("worker without the static assets binding has no pages to serve", async () => {
   await assertProblem(await get("/kagi"), 404);
+});
+
+/** The static assets, as the build wrote them: the live router's HTML, nonce and all. */
+const assets = {
+  fetch: (request: Request) => {
+    const path = new URL(request.url).pathname;
+    if (path === "/kagi") {
+      return Promise.resolve(
+        new Response(
+          '<!DOCTYPE html><html><head><script nonce="BUILD=="></script>' +
+            '<style nonce="BUILD==">p{}</style></head><body><p>kagi</p></body></html>',
+          {
+            headers: {
+              "content-type": "text/html; charset=utf-8",
+              etag: '"abc"',
+            },
+          },
+        ),
+      );
+    }
+    return Promise.resolve(
+      new Response("x", { headers: { "content-type": "text/javascript" } }),
+    );
+  },
+};
+
+Deno.test("worker serves a page with a fresh nonce and a CSP header that names it", async () => {
+  const nonces = new Set<string>();
+  for (let i = 0; i < 2; i++) {
+    const res = await worker.fetch(new Request("http://x/kagi"), {
+      ASSETS: assets,
+    });
+    assertEquals(res.status, 200);
+    const policy = res.headers.get("content-security-policy") ?? "";
+    const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
+    assert(nonce && nonce !== "BUILD==");
+    assertStringIncludes(policy, "'strict-dynamic'");
+    const html = await res.text();
+    assertEquals(html.split(`nonce="${nonce}"`).length - 1, 2);
+    assert(!html.includes('nonce="BUILD=="'));
+    assertEquals(res.headers.get("etag"), null);
+    assertEquals(res.headers.get("cache-control"), "no-store");
+    nonces.add(nonce);
+  }
+  assertEquals(nonces.size, 2);
+});
+
+Deno.test("worker passes non-HTML assets through untouched, without a CSP", async () => {
+  const res = await worker.fetch(new Request("http://x/assets/app.js"), {
+    ASSETS: assets,
+  });
+  assertEquals(res.headers.get("content-security-policy"), null);
+  assertEquals(await res.text(), "x");
 });
 
 const post = (headers: Record<string, string>) =>

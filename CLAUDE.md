@@ -23,7 +23,9 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   localStorage）、`device.ts`（subscription と IndexedDB の非 extractable ECDSA
   端末鍵）、`connection.ts`（WebSocket。結果はメモリにだけ保持）、
   `substitute.ts`（`[NAME]` の置換、送信先ホスト制限、結果からの秘密の除去）、
-  画面は `islands/kagi_app.tsx`（`/kagi`）。
+  `brief.ts`（AI エージェントに渡す説明。URL 入り、秘密は名前だけ。承認画面の
+  「リクエスト元の設定」からコピー）、 画面は
+  `islands/kagi_app.tsx`（`/kagi`）。
 - リクエストは 3 種類（`protocol.ts` の `KagiRequest`）。3 つめは
   `github-create-repo`: スマホが App でリポジトリを作り（作成用トークンはスマホ
   内で使い捨て、直後に revoke）、名前と URL だけを返す。公開範囲は必須。CLI は
@@ -58,8 +60,8 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
 - `web/server/` — router・asset bundler・API・config・og 画像・Worker。
   - `router.tsx` — ローカル (`deno serve`)・テスト・静的ビルドが使う唯一の
     ルーター定義。
-  - `worker.ts` — Cloudflare の Worker。`/api/*` だけを答える（他は static
-    assets）。API を足したらここにも配線する。
+  - `worker.ts` — Cloudflare の Worker。`/api/*` を答え、ページは `pages.ts`
+    で静的 HTML に CSP nonce を付けて返す。API を足したらここにも配線する。
 - `web/tests/` — lightpanda によるブラウザ smoke（`deno task test:browser`）。
 
 ## プッシュ通知
@@ -128,9 +130,13 @@ env アクセスは `web/server/config.ts` に集約し、ホスト非依存に�
 - 両 router に `@remix-run/cop-middleware` の `cop()` を入れてある。クロス
   オリジンのブラウザからの unsafe メソッドを token 無しで拒否する（リクエスト元
   はブラウザ以外を想定）。
-- `router.tsx` に `@remix-run/csp-middleware` の `csp()`（`web/server/csp.ts`、
-  nonce + `'strict-dynamic'`）。ヘッダが付くのはライブの router（`deno serve`）
-  だけで、Workers の static assets には付かない。
+- CSP は `@remix-run/csp-middleware` の `csp()`（`web/server/csp.ts`、nonce +
+  `'strict-dynamic'`）。`router.tsx`（`deno serve`）はそのまま付ける。本番は
+  ページも Worker を先に通し（`runWorkerFirst` は `/*`
+  から静的ファイルを除いたもの）、 `web/server/pages.ts` が `ASSETS`
+  バインディングから静的 HTML を取って、ビルド時の nonce をリクエストごとの
+  nonce に差し替え、同じ `csp()` でヘッダーを付ける
+  （`no-store`）。JS・CSS・画像・`sw.js`・manifest は Worker を通らない。
 
 ## GitHub Actions の lockfile
 

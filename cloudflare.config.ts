@@ -42,13 +42,24 @@ export default defineConfig({
     assets: {
       htmlHandling: "auto-trailing-slash",
       notFoundHandling: "none",
-      // Only these reach the Worker; every other path is a static file.
-      runWorkerFirst: ["/api/*"],
+      // The API and the pages reach the Worker first; the files the pages load go straight to the
+      // assets. A page gets this request's CSP nonce there (`web/server/pages.ts`).
+      runWorkerFirst: [
+        "/*",
+        "!/assets/*",
+        "!/static/*",
+        "!/og/*",
+        "!/icons/*",
+        "!/sw.js",
+        "!/manifest.webmanifest",
+      ],
     },
     exports: {
       KagiRoom: exports.durableObject({ storage: "sqlite" }),
     },
     env: {
+      // The static build, which the Worker fetches pages from (`web/server/pages.ts`).
+      ASSETS: bindings.assets(),
       KAGI_ROOM: bindings.durableObject({
         worker: WORKER,
         exportName: "KagiRoom",

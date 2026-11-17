@@ -48,8 +48,8 @@ export default function Docs(_handle: Handle) {
             ）を指定しておくと、別のホストへは送れなくなる。
           </li>
           <li>
-            <a href={routes.kagi.href()}>承認</a>{" "}
-            の画面の「リクエスト元の設定」に出る
+            <a href={routes.kagi.href()}>kagi</a>{" "}
+            の「設定」タブの「リクエスト元の設定」に出る
             <code>{`${ORIGIN}/api/sub/<id>`}</code>{" "}
             がリクエスト用の URL。 この ID
             を知っていれば誰でもリクエストを送れるので、ID は秘密にしておく。

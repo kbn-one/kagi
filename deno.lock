@@ -5,6 +5,7 @@
     "jsr:@kuboon/browser-how-to@0.2": "0.2.0",
     "jsr:@negrel/http-ece@0.7.0": "0.7.0",
     "jsr:@negrel/webpush@0.5": "0.5.0",
+    "jsr:@remix-kbn/apple-ui@0.1": "0.1.0",
     "jsr:@remix-kbn/assets-deno@0.9": "0.9.0",
     "jsr:@remix-kbn/ssg@*": "0.13.0",
     "jsr:@remix-kbn/ssg@0.13": "0.13.0",
@@ -19,6 +20,7 @@
     "jsr:@std/path@^1.1.5": "1.1.6",
     "npm:@cloudflare/build-output-utils@0.9.1": "0.9.1",
     "npm:@cloudflare/config@0.25.0": "0.25.0",
+    "npm:@lightpanda/browser@*": "1.6.0",
     "npm:@lightpanda/browser@^1.6.0": "1.6.0",
     "npm:@remix-run/component@^1.2.0": "1.2.0",
     "npm:@remix-run/cop-middleware@1": "1.0.0",
@@ -57,6 +59,12 @@
     },
     "@panva/jose@6.2.3": {
       "integrity": "57cc772f01b2ac60f847a7e6ec815059762768186266ed833fb59953e9611312"
+    },
+    "@remix-kbn/apple-ui@0.1.0": {
+      "integrity": "d83c2369a052f8a992e2664b61c96774132991274f080085cdd834eca7720246",
+      "dependencies": [
+        "npm:@remix-run/component"
+      ]
     },
     "@remix-kbn/assets-deno@0.9.0": {
       "integrity": "8295e2882f80fea7961922420541e30bbb8f78b1dd40378aadc1ba711ec5ee0b",
@@ -2140,6 +2148,7 @@
   "workspace": {
     "dependencies": [
       "jsr:@kuboon/browser-how-to@0.2",
+      "jsr:@remix-kbn/apple-ui@0.1",
       "jsr:@remix-kbn/assets-deno@0.9",
       "jsr:@remix-kbn/ssg@0.13",
       "jsr:@remix-kbn/web-push@0.1",

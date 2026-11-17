@@ -73,8 +73,17 @@ export interface LayoutProps {
    * `render()` stamps the ones it generates. Absent for a render with no `csp()` in front of it.
    */
   nonce?: string;
+  /**
+   * Which frame goes around the page: `"site"` (the default) is the header, the column and the
+   * footer; `"app"` is the whole window and nothing else, for a screen that brings its own
+   * navigation — `/kagi`, whose tab bar replaces the site's links.
+   */
+  frame?: Frame;
   children: RemixNode;
 }
+
+/** See {@link LayoutProps.frame}. */
+export type Frame = "site" | "app";
 
 /** Where the client runtime lives, and what it pulls in behind it. */
 export interface ClientRuntime {
@@ -103,6 +112,8 @@ export interface PageModule<Props = Record<string, never>> {
   description?: string;
   /** Whether the page places a client entry, so the shell boots the runtime for it. */
   hydrate: boolean;
+  /** The frame around the page (see {@link LayoutProps.frame}). Defaults to `"site"`. */
+  frame?: Frame;
 }
 
 /**
@@ -180,7 +191,9 @@ export function Layout(handle: Handle<LayoutProps>) {
           ))}
         </head>
         <body>
-          <Shell>{props.children}</Shell>
+          {props.frame === "app"
+            ? <main mix={appStyle}>{props.children}</main>
+            : <Shell>{props.children}</Shell>}
           {props.script
             ? (
               <script
@@ -276,6 +289,12 @@ const navStyle = css({
   flexWrap: "wrap",
   gap: "1rem",
 });
+
+/**
+ * The `"app"` frame: exactly the window. `dvh` so the bottom of it is the bottom of what is
+ * visible, with or without the browser's toolbar; the page inside lays out its own scrolling.
+ */
+const appStyle = css({ height: "100dvh", overflow: "hidden" });
 
 const mainStyle = css({ paddingBlock: "1.5rem 2.5rem" });
 

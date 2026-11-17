@@ -135,8 +135,8 @@ Deno.test({
           1,
         );
 
-        // Set up (a vault in localStorage, which the server cannot see): the approver's screen, with
-        // the unlock action — once — and no create action.
+        // Set up (a vault in localStorage, which the server cannot see): the approver's screen, in
+        // three tabs. 承認 first; 金庫 has the unlock action — once — and nothing creates a vault.
         await page.evaluate(() =>
           localStorage.setItem(
             "kagi.vault",
@@ -151,13 +151,34 @@ Deno.test({
         );
         await page.goto(`http://127.0.0.1:${appPort}/kagi`);
         await ready();
-        await waitForText("リクエスト元の設定");
-        const after = await labels();
+        await waitForText("承認待ちのリクエストはありません");
         assertEquals(
-          after.filter((l) => l === "パスキーで開いて編集").length,
+          await page.$$eval(
+            'nav[aria-label="kagi"] a',
+            (tabs) => tabs.map((a) => a.textContent?.trim() ?? ""),
+          ),
+          ["承認", "金庫", "設定"],
+        );
+        const openTab = async (hash: string, title: string) => {
+          await page.$eval(
+            `nav[aria-label="kagi"] a[href="${hash}"]`,
+            (a) => (a as HTMLAnchorElement).click(),
+          );
+          await page.waitForFunction(
+            (t: string) => document.querySelector("h1")?.textContent === t,
+            { timeout: 5_000 },
+            title,
+          );
+        };
+        await openTab("#vault", "金庫");
+        const vault = await labels();
+        assertEquals(
+          vault.filter((l) => l === "パスキーで開いて編集").length,
           1,
         );
-        assertEquals(after.includes("パスキーを作成"), false);
+        assertEquals(vault.includes("パスキーを作成"), false);
+        await openTab("#settings", "設定");
+        await waitForText("リクエスト元の設定");
 
         await page.close();
         await context.close();

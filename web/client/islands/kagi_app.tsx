@@ -5,9 +5,11 @@
  * add to the home screen, turn notifications on (which also registers this phone as the approver,
  * `lib/kagi/device.ts`), and create the passkey that seals the secrets (`lib/kagi/vault.ts`).
  *
- * Then it is the approver's screen: the requests waiting for a decision, live over the
- * subscription's WebSocket (`lib/kagi/connection.ts`), and below them, folded away, the secrets,
- * what a requester needs to know, and this phone's settings.
+ * Then it is the approver's screen: three tabs in `@remix-kbn/apple-ui`'s `TabView`, each a `#hash`
+ * on `/kagi` — 承認 (`#approve`, the default, where a notification lands: the requests waiting for a
+ * decision, live over the subscription's WebSocket, `lib/kagi/connection.ts`), 金庫 (`#vault`, the
+ * secrets) and 設定 (`#settings`: notifications, what a requester needs to know, the passkey, and
+ * this phone's registration).
  *
  * Approving asks for the passkey every time: that unlocks the secrets, fills the request's
  * placeholders, makes the call from this browser, and keeps the (scrubbed) answer in memory until
@@ -23,6 +25,8 @@ import {
   type SerializableValue,
 } from "@remix-run/component";
 
+import { TabView } from "@remix-kbn/apple-ui/tabview";
+
 import { routes } from "../routes.ts";
 import {
   actionStyle,
@@ -31,7 +35,7 @@ import {
   dangerStyle,
   primaryStyle,
 } from "../theme.ts";
-import { color, font, radius } from "../tokens.ts";
+import { color, contentWidth, font, radius } from "../tokens.ts";
 import { showA2hsGuide } from "@kuboon/browser-how-to/a2hs/ui";
 import { showPasskeyGuide } from "@kuboon/browser-how-to/passkeys/ui";
 import { createPushGuide, showPushGuide } from "@kuboon/browser-how-to/push/ui";
@@ -107,6 +111,21 @@ const STATUS_LABEL: Record<TxStatus, string> = {
   expired: "期限切れ",
 };
 
+/** The approver's three tabs, each a `#hash` on `/kagi`. */
+type Tab = "approve" | "vault" | "settings";
+
+const TAB_TITLE: Record<Tab, string> = {
+  approve: "承認",
+  vault: "金庫",
+  settings: "設定",
+};
+
+/** The tab a URL's hash names; anything else is 承認, where a notification lands. */
+const tabOf = (hash: string): Tab => {
+  const name = hash.replace(/^#/, "");
+  return name === "vault" || name === "settings" ? name : "approve";
+};
+
 const errorText = (e: unknown, fallback: string) =>
   e instanceof Error && e.message ? e.message : fallback;
 
@@ -135,6 +154,8 @@ export const KagiApp = clientEntry(
     /** Notifications have worked once on this phone. */
     let pushOk = false;
     let connection: KagiConnection | null = null;
+    /** The tab on show, from the URL's hash (read after hydration, like the rest). */
+    let tab: Tab = "approve";
     const focusTx = isClientEnv
       ? new URL(location.href).searchParams.get("tx")
       : null;
@@ -189,12 +210,27 @@ export const KagiApp = clientEntry(
         standalone = device().isStandalone;
         browserMode = browserModeChosen();
         pushOk = pushDone();
+        tab = tabOf(location.hash);
         loaded = true;
         startConnection();
         handle.update();
       }, 0);
       handle.signal.addEventListener("abort", () => connection?.close());
+      // The tab bar's tabs are `#hash` links; a message from one tab means nothing on the next.
+      addEventListener("hashchange", () => {
+        const next = tabOf(location.hash);
+        if (next === tab) return;
+        tab = next;
+        status = null;
+        handle.update();
+      }, { signal: handle.signal });
     }
+
+    /** Shows `next`, keeping the status line (unlike a tap on the tab bar). */
+    const goTo = (next: Tab) => {
+      tab = next;
+      location.hash = next;
+    };
 
     // --- secrets --------------------------------------------------------------
 
@@ -206,6 +242,7 @@ export const KagiApp = clientEntry(
         ) return;
         unlocked = await createVault();
         vaultExists = true;
+        goTo("vault");
         setStatus(
           "パスキーを作成しました。最初の秘密を追加してください。",
           "success",
@@ -673,7 +710,7 @@ export const KagiApp = clientEntry(
       </section>
     );
 
-    // --- the approver's screen -------------------------------------------------
+    // --- the approver's screen: three tabs -----------------------------------
 
     const statusLine = () => {
       const state = connection?.state;
@@ -708,266 +745,25 @@ export const KagiApp = clientEntry(
       );
     };
 
-    const secretEditor = (unlocked: UnlockedVault) => (
-      <section mix={cardStyle}>
-        <h2>秘密</h2>
-        <div>
-          <ul mix={listStyle}>
-            {Object.keys(unlocked.entries).length === 0 && (
-              <li mix={mutedStyle}>まだ秘密がありません。</li>
-            )}
-            {Object.entries(unlocked.entries).map(([name, entry]) => (
-              <li mix={[itemStyle, secretRowStyle]} key={name}>
-                <code>[{name}]</code>
-                <span mix={mutedStyle}>{describeSecret(entry)}</span>
-                <button
-                  type="button"
-                  mix={[
-                    actionStyle,
-                    dangerStyle,
-                    on("click", () =>
-                      void onRemoveSecret(name)),
-                  ]}
-                >
-                  削除
-                </button>
-              </li>
-            ))}
-          </ul>
-          <div mix={formStyle}>
-            <input
-              placeholder="名前 (例: GH_SECRET)"
-              aria-label="秘密の名前"
-              autocomplete="off"
-              autocapitalize="characters"
-              mix={[
-                inputStyle,
-                ref((n) => (nameInput = n as HTMLInputElement)),
-              ]}
-            />
-            <input
-              type="password"
-              placeholder="値"
-              aria-label="秘密の値"
-              autocomplete="off"
-              mix={[
-                inputStyle,
-                ref((n) => (valueInput = n as HTMLInputElement)),
-              ]}
-            />
-            <input
-              placeholder="送信を許すホスト (例: api.github.com、空なら制限なし)"
-              aria-label="送信を許すホスト"
-              autocomplete="off"
-              autocapitalize="none"
-              mix={[
-                inputStyle,
-                ref((n) => (hostsInput = n as HTMLInputElement)),
-              ]}
-            />
-          </div>
-          <div mix={rowStyle}>
-            <button
-              type="button"
-              disabled={busy}
-              mix={[actionStyle, primaryStyle, on("click", onAddSecret)]}
-            >
-              追加して保存
-            </button>
-            <button type="button" mix={[actionStyle, on("click", onLock)]}>
-              閉じる
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              mix={[actionStyle, on("click", onCreateVault)]}
-            >
-              パスキーを作り直す
-            </button>
-          </div>
+    const pendingCount = () =>
+      connection
+        ? [...connection.transactions.values()].filter((tx) =>
+          tx.status === "pending"
+        ).length
+        : 0;
 
-          <h3>GitHub App を追加</h3>
-          <p mix={mutedStyle}>
-            App の秘密鍵はこの端末から出ません。リクエスト元には、指定された
-            リポジトリと権限だけに絞った 1 時間有効のトークンを、承認のたびに
-            発行して渡します。
-          </p>
-          <div mix={formStyle}>
-            <input
-              placeholder="名前 (例: GH_APP)"
-              aria-label="GitHub App の名前"
-              autocomplete="off"
-              autocapitalize="characters"
-              mix={[
-                inputStyle,
-                ref((n) => (appNameInput = n as HTMLInputElement)),
-              ]}
-            />
-            <input
-              placeholder="App ID または Client ID"
-              aria-label="GitHub App ID"
-              autocomplete="off"
-              autocapitalize="none"
-              mix={[
-                inputStyle,
-                ref((n) => (appIdInput = n as HTMLInputElement)),
-              ]}
-            />
-            <label mix={fileLabelStyle}>
-              <span>秘密鍵ファイル（.pem）を選ぶ</span>
-              <input
-                type="file"
-                aria-label="GitHub App の秘密鍵ファイル"
-                mix={on("change", (event) => {
-                  void onPickKeyFile(event.currentTarget as HTMLInputElement);
-                })}
-              />
-            </label>
-            <textarea
-              placeholder="または .pem の中身（-----BEGIN RSA PRIVATE KEY----- から END まで）を貼り付け"
-              aria-label="GitHub App の秘密鍵"
-              autocomplete="off"
-              autocapitalize="none"
-              spellcheck={false}
-              rows={4}
-              mix={[
-                inputStyle,
-                ref((n) => (appKeyInput = n as HTMLTextAreaElement)),
-              ]}
-            />
-          </div>
-          <div mix={rowStyle}>
-            <button
-              type="button"
-              disabled={busy}
-              mix={[actionStyle, primaryStyle, on("click", onAddApp)]}
-            >
-              GitHub App を保存
-            </button>
-          </div>
-        </div>
-      </section>
-    );
-
-    const secretsSection = () => (
-      <details mix={foldStyle}>
-        <summary>秘密</summary>
-        <p mix={mutedStyle}>
-          この端末の中にだけ、パスキーで暗号化して保存しています。
-        </p>
-        <div mix={rowStyle}>
-          <button
-            type="button"
-            disabled={busy}
-            mix={[actionStyle, primaryStyle, on("click", onUnlock)]}
-          >
-            パスキーで開いて編集
-          </button>
-          <button
-            type="button"
-            mix={[actionStyle, dangerStyle, on("click", onDeleteVault)]}
-          >
-            すべて削除
-          </button>
-        </div>
-      </details>
-    );
-
-    const brief = (id: string) =>
-      agentBrief({
-        base: endpoint(routes.api.sub.register.href({ id })),
-        secrets: unlocked?.entries,
-      });
-
-    const onCopyBrief = (id: string) =>
-      run(async () => {
-        await navigator.clipboard.writeText(brief(id));
-        setStatus(
-          "エージェント向けの説明をコピーしました。URL を含むので、渡す相手に気をつけてください。",
-          "success",
-        );
-      });
-
-    const requesterSection = (id: string) => (
-      <details mix={foldStyle}>
-        <summary>リクエスト元の設定</summary>
-        <p mix={mutedStyle}>
-          AI エージェントには、この URL と使い方をまとめた説明を渡します。ID
-          を知っている人は誰でもリクエストを送れるので、ID
-          は秘密にしてください。
-        </p>
-        <div mix={rowStyle}>
-          <button
-            type="button"
-            disabled={busy}
-            mix={[
-              actionStyle,
-              primaryStyle,
-              on("click", () => void onCopyBrief(id)),
-            ]}
-          >
-            エージェント向けの説明をコピー
-          </button>
-        </div>
-        <p mix={mutedStyle}>
-          {unlocked
-            ? "秘密の名前も含めています（値は含みません）。"
-            : "秘密の名前も入れるなら、先に「秘密」をパスキーで開いてからコピーしてください。"}
-        </p>
-        <details>
-          <summary mix={mutedStyle}>内容を見る</summary>
-          <pre mix={codeStyle}>{brief(id)}</pre>
-        </details>
-        <p mix={mutedStyle}>curl で試すなら:</p>
-        <pre mix={codeStyle}>{usage(endpoint, id)}</pre>
-        <p mix={mutedStyle}>
-          git push を GitHub App で 1 リポジトリに絞るなら、エージェント側で:
-        </p>
-        <pre mix={codeStyle}>{gitHelperConfig(endpoint, id)}</pre>
-        <p mix={mutedStyle}>
-          詳しくは <a href={routes.docs.href()}>使い方</a>。
-        </p>
-      </details>
-    );
-
-    const deviceSection = () => (
-      <details mix={foldStyle}>
-        <summary>この端末</summary>
-        {connection?.push === "on" && (
-          <div mix={rowStyle}>
-            <span>通知: オン</span>
-            <button
-              type="button"
-              disabled={busy}
-              mix={[actionStyle, on("click", onDisablePush)]}
-            >
-              通知を止める
-            </button>
-          </div>
-        )}
-        <div mix={rowStyle}>
-          <button
-            type="button"
-            disabled={busy}
-            mix={[actionStyle, dangerStyle, on("click", onForget)]}
-          >
-            承認者の登録を解除
-          </button>
-        </div>
-      </details>
-    );
-
-    const requestsCard = () => {
-      if (!connection) return null;
-      const txs = [...connection.transactions.values()].sort((a, b) =>
-        b.createdAt - a.createdAt
-      );
+    /** 承認: the requests, newest first. */
+    const approveTab = () => {
+      const txs = connection
+        ? [...connection.transactions.values()].sort((a, b) =>
+          b.createdAt - a.createdAt
+        )
+        : [];
       return (
-        <section mix={cardStyle}>
-          <h2>リクエスト</h2>
+        <>
           {statusLine()}
           {txs.length === 0 && (
-            <p mix={mutedStyle}>
+            <p mix={[mutedStyle, emptyStyle]}>
               承認待ちのリクエストはありません。来たら通知します。
             </p>
           )}
@@ -1028,34 +824,388 @@ export const KagiApp = clientEntry(
               </li>
             ))}
           </ul>
-        </section>
+        </>
       );
     };
 
-    return () => {
-      const step = loaded ? currentStep() : null;
-      return (
-        <div>
-          {step && stepper(step)}
-          {status && (
-            <div role="alert" data-kind={status.kind} mix={alertStyle}>
-              <span>{status.message}</span>
+    const secretList = (unlocked: UnlockedVault) => (
+      <ul mix={listStyle}>
+        {Object.keys(unlocked.entries).length === 0 && (
+          <li mix={mutedStyle}>まだ秘密がありません。</li>
+        )}
+        {Object.entries(unlocked.entries).map(([name, entry]) => (
+          <li mix={[itemStyle, secretRowStyle]} key={name}>
+            <code>[{name}]</code>
+            <span mix={mutedStyle}>{describeSecret(entry)}</span>
+            <button
+              type="button"
+              mix={[
+                actionStyle,
+                dangerStyle,
+                on("click", () =>
+                  void onRemoveSecret(name)),
+              ]}
+            >
+              削除
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+
+    const addSecretCard = () => (
+      <section mix={cardStyle}>
+        <h2>秘密を追加</h2>
+        <div mix={formStyle}>
+          <input
+            placeholder="名前 (例: GH_SECRET)"
+            aria-label="秘密の名前"
+            autocomplete="off"
+            autocapitalize="characters"
+            mix={[
+              inputStyle,
+              ref((n) => (nameInput = n as HTMLInputElement)),
+            ]}
+          />
+          <input
+            type="password"
+            placeholder="値"
+            aria-label="秘密の値"
+            autocomplete="off"
+            mix={[
+              inputStyle,
+              ref((n) => (valueInput = n as HTMLInputElement)),
+            ]}
+          />
+          <input
+            placeholder="送信を許すホスト (例: api.github.com、空なら制限なし)"
+            aria-label="送信を許すホスト"
+            autocomplete="off"
+            autocapitalize="none"
+            mix={[
+              inputStyle,
+              ref((n) => (hostsInput = n as HTMLInputElement)),
+            ]}
+          />
+        </div>
+        <div mix={rowStyle}>
+          <button
+            type="button"
+            disabled={busy}
+            mix={[actionStyle, primaryStyle, on("click", onAddSecret)]}
+          >
+            追加して保存
+          </button>
+        </div>
+      </section>
+    );
+
+    const addAppCard = () => (
+      <section mix={cardStyle}>
+        <h2>GitHub App を追加</h2>
+        <p mix={mutedStyle}>
+          App の秘密鍵はこの端末から出ません。リクエスト元には、指定された
+          リポジトリと権限だけに絞った 1 時間有効のトークンを、承認のたびに
+          発行して渡します。
+        </p>
+        <div mix={formStyle}>
+          <input
+            placeholder="名前 (例: GH_APP)"
+            aria-label="GitHub App の名前"
+            autocomplete="off"
+            autocapitalize="characters"
+            mix={[
+              inputStyle,
+              ref((n) => (appNameInput = n as HTMLInputElement)),
+            ]}
+          />
+          <input
+            placeholder="App ID または Client ID"
+            aria-label="GitHub App ID"
+            autocomplete="off"
+            autocapitalize="none"
+            mix={[
+              inputStyle,
+              ref((n) => (appIdInput = n as HTMLInputElement)),
+            ]}
+          />
+          <label mix={fileLabelStyle}>
+            <span>秘密鍵ファイル（.pem）を選ぶ</span>
+            <input
+              type="file"
+              aria-label="GitHub App の秘密鍵ファイル"
+              mix={on("change", (event) => {
+                void onPickKeyFile(event.currentTarget as HTMLInputElement);
+              })}
+            />
+          </label>
+          <textarea
+            placeholder="または .pem の中身（-----BEGIN RSA PRIVATE KEY----- から END まで）を貼り付け"
+            aria-label="GitHub App の秘密鍵"
+            autocomplete="off"
+            autocapitalize="none"
+            spellcheck={false}
+            rows={4}
+            mix={[
+              inputStyle,
+              ref((n) => (appKeyInput = n as HTMLTextAreaElement)),
+            ]}
+          />
+        </div>
+        <div mix={rowStyle}>
+          <button
+            type="button"
+            disabled={busy}
+            mix={[actionStyle, primaryStyle, on("click", onAddApp)]}
+          >
+            GitHub App を保存
+          </button>
+        </div>
+      </section>
+    );
+
+    /** 金庫: the secrets, sealed until the passkey opens them. */
+    const vaultTab = () =>
+      unlocked
+        ? (
+          <>
+            <div mix={rowStyle}>
+              <span mix={mutedStyle}>開いています</span>
+              <button
+                type="button"
+                mix={[actionStyle, pushEndStyle, on("click", onLock)]}
+              >
+                閉じる
+              </button>
             </div>
+            {secretList(unlocked)}
+            {addSecretCard()}
+            {addAppCard()}
+          </>
+        )
+        : (
+          <section mix={cardStyle}>
+            <h2>閉じています</h2>
+            <p mix={mutedStyle}>
+              秘密はこの端末の中にだけ、パスキーで暗号化して保存しています。サーバーには送りません。
+            </p>
+            <div mix={rowStyle}>
+              <button
+                type="button"
+                disabled={busy}
+                mix={[actionStyle, primaryStyle, on("click", onUnlock)]}
+              >
+                パスキーで開いて編集
+              </button>
+            </div>
+          </section>
+        );
+
+    const brief = (id: string) =>
+      agentBrief({
+        base: endpoint(routes.api.sub.register.href({ id })),
+        secrets: unlocked?.entries,
+      });
+
+    const onCopyBrief = (id: string) =>
+      run(async () => {
+        await navigator.clipboard.writeText(brief(id));
+        setStatus(
+          "エージェント向けの説明をコピーしました。URL を含むので、渡す相手に気をつけてください。",
+          "success",
+        );
+      });
+
+    const requesterSection = (id: string) => (
+      <section mix={cardStyle}>
+        <h2>リクエスト元の設定</h2>
+        <p mix={mutedStyle}>
+          AI エージェントには、この URL と使い方をまとめた説明を渡します。ID
+          を知っている人は誰でもリクエストを送れるので、ID
+          は秘密にしてください。
+        </p>
+        <div mix={rowStyle}>
+          <button
+            type="button"
+            disabled={busy}
+            mix={[
+              actionStyle,
+              primaryStyle,
+              on("click", () => void onCopyBrief(id)),
+            ]}
+          >
+            エージェント向けの説明をコピー
+          </button>
+        </div>
+        <p mix={mutedStyle}>
+          {unlocked ? "秘密の名前も含めています（値は含みません）。" : (
+            <>
+              秘密の名前も入れるなら、先に<a href="#vault">金庫</a>
+              をパスキーで開いてからコピーしてください。
+            </>
           )}
+        </p>
+        <details mix={foldStyle}>
+          <summary>内容を見る</summary>
+          <pre mix={codeStyle}>{brief(id)}</pre>
+        </details>
+        <details mix={foldStyle}>
+          <summary>curl で試す</summary>
+          <pre mix={codeStyle}>{usage(endpoint, id)}</pre>
+        </details>
+        <details mix={foldStyle}>
+          <summary>git push を GitHub App で 1 リポジトリに絞る</summary>
+          <p mix={mutedStyle}>エージェント側で:</p>
+          <pre mix={codeStyle}>{gitHelperConfig(endpoint, id)}</pre>
+        </details>
+      </section>
+    );
+
+    /** 設定: notifications, the requester's side, the passkey, and this phone's registration. */
+    const settingsTab = (id: string) => (
+      <>
+        <section mix={cardStyle}>
+          <h2>通知</h2>
+          {connection?.push === "on"
+            ? (
+              <div mix={rowStyle}>
+                <span>オン</span>
+                <button
+                  type="button"
+                  disabled={busy}
+                  mix={[actionStyle, pushEndStyle, on("click", onDisablePush)]}
+                >
+                  通知を止める
+                </button>
+              </div>
+            )
+            : (
+              <div mix={rowStyle}>
+                <span mix={mutedStyle}>
+                  {connection?.push === "denied"
+                    ? "ブロックされています"
+                    : connection?.push === "off"
+                    ? "オフ"
+                    : "使えません"}
+                </span>
+                <button
+                  type="button"
+                  disabled={busy}
+                  mix={[
+                    actionStyle,
+                    primaryStyle,
+                    pushEndStyle,
+                    on("click", onEnablePush),
+                  ]}
+                >
+                  通知を有効にする
+                </button>
+              </div>
+            )}
+        </section>
+        {requesterSection(id)}
+        <section mix={cardStyle}>
+          <h2>パスキー</h2>
+          <p mix={mutedStyle}>
+            作り直すと今の秘密は消え、新しいパスキーで空の金庫を作ります。
+          </p>
+          <div mix={rowStyle}>
+            <button
+              type="button"
+              disabled={busy}
+              mix={[actionStyle, on("click", onCreateVault)]}
+            >
+              パスキーを作り直す
+            </button>
+            <button
+              type="button"
+              mix={[actionStyle, dangerStyle, on("click", onDeleteVault)]}
+            >
+              秘密をすべて削除
+            </button>
+          </div>
+        </section>
+        <section mix={cardStyle}>
+          <h2>この端末</h2>
+          <p mix={mutedStyle}>
+            登録を解除すると、この ID へのリクエストは誰も承認できなくなります。
+          </p>
+          <div mix={rowStyle}>
+            <button
+              type="button"
+              disabled={busy}
+              mix={[actionStyle, dangerStyle, on("click", onForget)]}
+            >
+              承認者の登録を解除
+            </button>
+          </div>
+        </section>
+        <p mix={[mutedStyle, linksStyle]}>
+          <a href={routes.docs.href()}>使い方</a>
+          <a href={routes.home.href()}>kagi について</a>
+        </p>
+      </>
+    );
+
+    const alert = () =>
+      status && (
+        <div role="alert" data-kind={status.kind} mix={alertStyle}>
+          <span>{status.message}</span>
+        </div>
+      );
+
+    /** Setup, or the moment before the browser-only state is read: one scrolling column. */
+    const setupScreen = (step: Step | null) => (
+      <div mix={scrollStyle}>
+        <div mix={columnStyle}>
+          <h1>{step ? "はじめる" : TAB_TITLE.approve}</h1>
+          {step && stepper(step)}
+          {alert()}
           {!loaded && <p mix={mutedStyle} aria-busy="true">…</p>}
           {step === "install" && installStep()}
           {step === "push" && pushStep()}
           {step === "vault" && vaultStep()}
-          {unlocked && secretEditor(unlocked)}
-          {loaded && !step && sub && (
-            <>
-              {requestsCard()}
-              {!unlocked && secretsSection()}
-              {requesterSection(sub.id)}
-              {deviceSection()}
-            </>
+          {step && (
+            <p mix={[mutedStyle, linksStyle]}>
+              <a href={routes.home.href()}>kagi について</a>
+              <a href={routes.docs.href()}>使い方</a>
+            </p>
           )}
         </div>
+      </div>
+    );
+
+    return () => {
+      const step = loaded ? currentStep() : null;
+      if (!loaded || step || !sub) return setupScreen(step);
+      const id = sub.id;
+      return (
+        <TabView
+          label="kagi"
+          selected={`#${tab}`}
+          tabs={[
+            {
+              label: TAB_TITLE.approve,
+              icon: <ApproveIcon />,
+              href: "#approve",
+              badge: pendingCount(),
+            },
+            { label: TAB_TITLE.vault, icon: <VaultIcon />, href: "#vault" },
+            {
+              label: TAB_TITLE.settings,
+              icon: <SettingsIcon />,
+              href: "#settings",
+            },
+          ]}
+        >
+          <div mix={columnStyle}>
+            <h1>{TAB_TITLE[tab]}</h1>
+            {alert()}
+            {tab === "approve" && approveTab()}
+            {tab === "vault" && vaultTab()}
+            {tab === "settings" && settingsTab(id)}
+          </div>
+        </TabView>
       );
     };
   },
@@ -1383,3 +1533,79 @@ const foldStyle = css({
   "& summary": { cursor: "pointer", fontWeight: 600 },
   "&[open] summary": { marginBlockEnd: "0.5rem" },
 });
+
+const emptyStyle = css({ marginBlock: "2rem", textAlign: "center" });
+
+/** Pushes a button in a {@link rowStyle} to the row's far end. */
+const pushEndStyle = css({ marginInlineStart: "auto" });
+
+const linksStyle = css({
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "1rem",
+  marginBlock: "2rem 1rem",
+});
+
+/** The setup screen's scroller: the `"app"` frame does not scroll by itself. */
+const scrollStyle = css({ height: "100%", overflow: "auto" });
+
+/**
+ * The column every screen is set in. The frame is the whole window (`viewport-fit=cover`), so the
+ * column keeps clear of the notch, the status bar and the rounded corners itself; the tab bar's
+ * side is the tab view's to clear.
+ */
+const columnStyle = css({
+  maxWidth: contentWidth,
+  marginInline: "auto",
+  paddingBlock: "max(1.25rem, env(safe-area-inset-top)) 1.5rem",
+  paddingInline:
+    "max(1rem, env(safe-area-inset-left)) max(1rem, env(safe-area-inset-right))",
+  "& h1": { fontSize: "2.1rem", marginBlock: "0.5rem 1rem" },
+  "& section:first-of-type": { marginTop: "1rem" },
+});
+
+// --- tab icons ----------------------------------------------------------------
+// Stroked in `currentColor`, so they take the tab bar's colour for selected and not.
+
+const iconProps = {
+  width: "24",
+  height: "24",
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  "stroke-width": "1.8",
+  "stroke-linecap": "round",
+  "stroke-linejoin": "round",
+  "aria-hidden": "true",
+} as const;
+
+/** A shield with a check: a request let through. */
+function ApproveIcon(_handle: Handle) {
+  return () => (
+    <svg {...iconProps}>
+      <path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6L12 3Z" />
+      <path d="m8.75 12 2.25 2.25 4.25-4.5" />
+    </svg>
+  );
+}
+
+/** A safe with its dial. */
+function VaultIcon(_handle: Handle) {
+  return () => (
+    <svg {...iconProps}>
+      <rect x="3.5" y="4" width="17" height="15" rx="2.5" />
+      <circle cx="12" cy="11.5" r="3.25" />
+      <path d="M12 8.25v1.25M12 13.5v1.25M8.75 11.5H10M14 11.5h1.25M7 19v1.5M17 19v1.5" />
+    </svg>
+  );
+}
+
+/** A gear. */
+function SettingsIcon(_handle: Handle) {
+  return () => (
+    <svg {...iconProps}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.54V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.54-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.1 1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.54V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.54 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z" />
+    </svg>
+  );
+}

@@ -66,6 +66,7 @@ function pageAction(route: { href(): string }, page: PageModule) {
         description={page.description}
         image={image}
         script={page.hydrate ? clientRuntime : null}
+        frame={page.frame}
       >
         <Page />
       </Layout>,

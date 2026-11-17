@@ -82,6 +82,26 @@ API はスマホのブラウザーから呼ぶので、呼び先が CORS でこ�
 `repositories` と `permissions` は空にできない（GitHub は空を「全部」と解釈する
 ため）。App の鍵は通常の HTTP リクエストの `[NAME]` には埋め込めない。
 
+### GitHub API を App として呼ぶ
+
+API を 1 回呼ぶだけなら `github-api`
+リクエストで、トークンを受け取らずにスマホに
+呼ばせる。スマホは同じように絞ったトークンを発行して `api.github.com` を呼び、
+直後に失効させる。エージェントには API の応答だけが返る。
+
+```json
+{
+  "type": "github-api",
+  "app": "GH_APP",
+  "owner": "kbn-one",
+  "repositories": ["kagi"],
+  "permissions": { "issues": "write" },
+  "method": "POST",
+  "path": "/repos/kbn-one/kagi/issues",
+  "body": { "title": "…" }
+}
+```
+
 ### リポジトリを作る
 
 App に Repository permissions の **Repository creation: Read and write**

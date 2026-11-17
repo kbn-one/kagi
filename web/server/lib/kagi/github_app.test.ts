@@ -3,13 +3,16 @@ import { generateKeyPairSync } from "node:crypto";
 
 import {
   appJwt,
+  callGithubApi,
   createRepository,
   mintInstallationToken,
   pemToPkcs8,
 } from "../../../client/lib/kagi/github_app.ts";
 import {
+  type GithubApiRequest,
   type GithubAppTokenRequest,
   parseKagiRequest,
+  summarize,
 } from "../../../client/lib/kagi/protocol.ts";
 import {
   type GithubAppSecret,
@@ -352,5 +355,123 @@ Deno.test("create-repo requests must state visibility and a plain name", () => {
       { ...createReq },
       { GH_APP: { value: "x", hosts: [] } },
     )?.includes("GitHub App ではありません"),
+  );
+});
+
+const apiReq: GithubApiRequest = {
+  type: "github-api",
+  app: "GH_APP",
+  owner: "kbn-one",
+  repositories: ["kagi"],
+  permissions: { issues: "write" },
+  method: "POST",
+  path: "/repos/kbn-one/kagi/issues",
+  body: { title: "from kagi" },
+};
+
+/** A GitHub that mints a token, answers one API call (echoing the token, as a leak), and revokes. */
+function fakeApi(granted = ["kagi"]) {
+  const calls: {
+    method: string;
+    path: string;
+    auth: string;
+    body?: unknown;
+  }[] = [];
+  const fetchImpl = ((input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const method = init?.method ?? "GET";
+    const auth = new Headers(init?.headers).get("authorization") ?? "";
+    calls.push({
+      method,
+      path: url.pathname + url.search,
+      auth: auth === "Bearer ghs_api_only" ? "installation" : "app-jwt",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    if (url.pathname.endsWith("/installation")) {
+      return Promise.resolve(Response.json({ id: 42 }));
+    }
+    if (url.pathname === "/app/installations/42/access_tokens") {
+      return Promise.resolve(Response.json({
+        token: "ghs_api_only",
+        repositories: granted.map((name) => ({ name })),
+      }, { status: 201 }));
+    }
+    if (url.pathname === "/installation/token") {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    return Promise.resolve(
+      Response.json({ number: 7, note: "token ghs_api_only" }, {
+        status: 201,
+        headers: { "x-echo": "ghs_api_only" },
+      }),
+    );
+  }) as typeof fetch;
+  return { calls, fetchImpl };
+}
+
+Deno.test("callGithubApi makes the call with a narrowed token, returns only the answer, and revokes", async () => {
+  const { calls, fetchImpl } = fakeApi();
+  const result = await callGithubApi(apiReq, app, fetchImpl);
+  assertEquals(result.status, 201);
+  assertEquals(JSON.parse(result.body), {
+    number: 7,
+    note: "token [GH_APP]",
+  });
+  assertEquals(result.headers["x-echo"], "[GH_APP]");
+  assertEquals(
+    calls.map((c) => `${c.method} ${c.path} (${c.auth})`),
+    [
+      "GET /repos/kbn-one/kagi/installation (app-jwt)",
+      "POST /app/installations/42/access_tokens (app-jwt)",
+      "POST /repos/kbn-one/kagi/issues (installation)",
+      "DELETE /installation/token (installation)",
+    ],
+  );
+  assertEquals(calls[1].body, {
+    repositories: ["kagi"],
+    permissions: { issues: "write" },
+  });
+  assertEquals(calls[2].body, { title: "from kagi" });
+});
+
+Deno.test("callGithubApi drops a token wider than requested without calling the API", async () => {
+  const { calls, fetchImpl } = fakeApi(["kagi", "other"]);
+  await assertRejects(() => callGithubApi(apiReq, app, fetchImpl));
+  assert(!calls.some((c) => c.path.startsWith("/repos/kbn-one/kagi/issues")));
+});
+
+Deno.test("github-api requests stay on api.github.com and in the listed repositories", () => {
+  const { type: _t, path: _p, method: _m, body: _b, ...scope } = apiReq;
+  const base = { type: "github-api" as const, ...scope };
+  const cases: [unknown, string][] = [
+    [{ ...base }, "path"],
+    [{ ...base, path: "repos/kbn-one/kagi" }, "path"],
+    [{ ...base, path: "//evil.example/x" }, "path"],
+    [{ ...base, path: "/repos/kbn-one/kagi/../../other/x" }, "api.github.com"],
+    [{ ...base, path: "/repos/kbn-one/other/issues" }, "listed repositories"],
+    [{ ...base, path: "/repos/someone/kagi/issues" }, "listed repositories"],
+    [{ ...base, path: "/x#frag" }, "path"],
+    [{ ...base, path: "/user", method: "TRACE" }, "method"],
+    [{ ...base, repositories: [], path: "/user" }, "repositories"],
+  ];
+  for (const [body, fragment] of cases) {
+    const parsed = parseKagiRequest(body);
+    assert(typeof parsed === "string", JSON.stringify(body));
+    assert(parsed.includes(fragment), `${parsed} / ${fragment}`);
+  }
+  assertEquals(parseKagiRequest({ ...apiReq, method: "post" }), apiReq);
+  assertEquals(
+    parseKagiRequest({ ...base, path: "/repos/KBN-ONE/Kagi/pulls?state=open" }),
+    { ...base, path: "/repos/KBN-ONE/Kagi/pulls?state=open" },
+  );
+  assertEquals(
+    summarize(apiReq),
+    "GitHub API POST /repos/kbn-one/kagi/issues",
+  );
+  // Like the other GitHub requests, it needs an App, never a plain secret.
+  assert(
+    secretsProblem(apiReq, { GH_APP: { value: "x", hosts: [] } })?.includes(
+      "GitHub App ではありません",
+    ),
   );
 });

@@ -4,11 +4,12 @@ import { agentBrief } from "../../../client/lib/kagi/brief.ts";
 
 const base = "https://kagi.kbn.one/api/sub/abcdefghijklmnopqrstuv";
 
-Deno.test("the agent brief carries the endpoint and the three request shapes", () => {
+Deno.test("the agent brief carries the endpoint and every request shape", () => {
   const text = agentBrief({ base });
   assertStringIncludes(text, `Endpoint (keep private): ${base}`);
   assertStringIncludes(text, "POST <endpoint>/req");
   assertStringIncludes(text, '"type":"github-app-token","app":"GH_APP"');
+  assertStringIncludes(text, '"type":"github-api","app":"GH_APP"');
   assertStringIncludes(text, '"type":"github-create-repo"');
   assertStringIncludes(text, "GET <endpoint>/res?transaction_id=");
   assertStringIncludes(text, "Secret names: ask the human.");

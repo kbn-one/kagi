@@ -30,19 +30,23 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   （`#settings`）の 3 タブ。タブは hash のリンクで、`navigation-guard.ts` が
   ランタイムに横取りさせない。`/kagi` はページの `frame = "app"` で
   サイトのヘッダー・フッター無しの全画面（`layout.tsx`）。
-- リクエストは 3 種類（`protocol.ts` の `KagiRequest`）。3 つめは
-  `github-create-repo`: スマホが App でリポジトリを作り（作成用トークンはスマホ
-  内で使い捨て、直後に revoke）、名前と URL だけを返す。公開範囲は必須。CLI は
-  `tools/git_credential_kagi.ts create owner/name --public|--private`。
-- リクエストは 2 種類（`protocol.ts` の `KagiRequest`）: `[NAME]` を埋めて API
-  を 呼ぶ `http`（既定）と、GitHub App の installation token を 1
-  リポジトリ・指定 権限・1 時間に絞って発行する
-  `github-app-token`（`lib/kagi/github_app.ts`。App の秘密鍵は vault の
-  `kind: "github-app"` に入り、`http` リクエストには埋め込め
-  ない）。エージェント側は `tools/git_credential_kagi.ts`（git credential
-  helper。 `useHttpPath` で push
-  先のリポジトリ名を受け取り、それだけのトークンを頼む）。 App の設定手順は
-  `README.md`。
+- リクエストは 4 種類（`protocol.ts` の `KagiRequest`）。
+  - `http`（既定）: `[NAME]` を埋めて API を呼ぶ。
+  - `github-app-token`: GitHub App の installation token を指定リポジトリ・指定
+    権限・1 時間に絞って発行し、リクエスト元に渡す（`lib/kagi/github_app.ts`。
+    App の秘密鍵は vault の `kind: "github-app"` に入り、`http` リクエストには
+    埋め込めない）。エージェント側は `tools/git_credential_kagi.ts`（git
+    credential helper。`useHttpPath` で push 先のリポジトリ名を受け取り、それ
+    だけのトークンを頼む）。App の設定手順は `README.md`。
+  - `github-api`: 同じように絞ったトークンをスマホが発行して `api.github.com` +
+    `path` を 1 回呼び、直後に revoke する。トークンは
+    スマホの外に出ず、応答（トークンは `[APP]` に置換）だけを返す。
+    `/repos/OWNER/REPO/…` の path は `owner`・`repositories` の中に限る。
+  - `github-create-repo`: スマホが App でリポジトリを作り（作成用トークンは
+    スマホ内で使い捨て、直後に revoke）、名前と URL だけを返す。公開範囲は
+    必須。CLI は
+    `tools/git_credential_kagi.ts create owner/name
+    --public|--private`。
 - 通知はこのサーバーが自分で送る（下の「プッシュ通知」）。サインインは無い。
 - 既知の制約: `:id` を知る人は誰でもリクエストを送れる（承認者が拒否できる
   だけ）。呼び先 API は CORS でこのオリジンを許可している必要がある。

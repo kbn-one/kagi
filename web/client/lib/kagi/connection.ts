@@ -44,8 +44,12 @@ export interface KagiConnection {
   whenOnline(ms?: number): Promise<void>;
   /** Asks for notification permission (call it from a click) and starts the pushes. */
   enablePush(): Promise<void>;
-  /** Stops the pushes to this phone. */
-  disablePush(): Promise<void>;
+  /**
+   * Retires this subscription: the server forgets it and refuses its id from then on, and this
+   * browser's push subscription is dropped too. Resolves once the server has confirmed; the
+   * connection is closed after.
+   */
+  unregister(ms?: number): Promise<void>;
   decide(txId: string, approved: boolean): void;
   /** The call finished: keep its result until asked. */
   complete(txId: string, result: KagiResult): void;
@@ -62,6 +66,7 @@ export function connect(
   let state: ConnectionState = "connecting";
   let applicationServerKey: string | null = null;
   const onlineWaiters = new Set<() => void>();
+  let onUnregistered: (() => void) | null = null;
   let pushStored = false;
   let socket: WebSocket | null = null;
   let closed = false;
@@ -125,6 +130,10 @@ export function connect(
           case "push":
             pushStored = m.registered;
             break;
+          case "unregistered":
+            closed = true;
+            onUnregistered?.();
+            return;
           case "tx":
             transactions.set(m.transaction.id, m.transaction);
             break;
@@ -204,9 +213,28 @@ export function connect(
     async enablePush() {
       await subscribe();
     },
-    async disablePush() {
-      send({ type: "push", subscription: null });
-      await unsubscribePush();
+    async unregister(ms = 15_000) {
+      await this.whenOnline(ms);
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          onUnregistered = null;
+          reject(
+            new Error("サーバーから応答がありません。もう一度試してください。"),
+          );
+        }, ms);
+        onUnregistered = () => {
+          clearTimeout(timer);
+          onUnregistered = null;
+          resolve();
+        };
+        send({ type: "unregister" });
+      });
+      this.close();
+      // The server has forgotten it; the browser's subscription goes too, so the next
+      // registration starts from a fresh push endpoint.
+      await unsubscribePush().catch((e) =>
+        console.warn("kagi: unsubscribe", e)
+      );
     },
     decide: (txId, approved) => send({ type: "decision", txId, approved }),
     complete(txId, result) {

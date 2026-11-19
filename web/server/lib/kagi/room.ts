@@ -70,6 +70,11 @@ type Outcome =
   | { kind: "final"; tx: Transaction };
 
 const REG_KEY = "registration";
+/**
+ * Left behind when the approver retires the id (`unregister`), so it is never registered again:
+ * someone who learnt the old URL cannot claim it and receive what agents still send there.
+ */
+const RETIRED_KEY = "retired";
 const txKey = (id: string) => `tx:${id}`;
 
 const randomId = (bytes = 16): string =>
@@ -137,6 +142,7 @@ export class Room {
         detail: "publicKey must be an EC P-256 public JWK",
       });
     }
+    if (await this.#deps.storage.get(RETIRED_KEY)) return retiredSub();
     if (await this.#deps.storage.get(REG_KEY)) {
       return problem({
         status: 409,
@@ -157,11 +163,39 @@ export class Room {
     return this.#deps.storage.get<Registration>(REG_KEY);
   }
 
+  /** The answer for an id with no registration: 410 once retired, 404 if it never was one. */
+  async #missing(): Promise<Response> {
+    return (await this.#deps.storage.get(RETIRED_KEY))
+      ? retiredSub()
+      : unknownSub();
+  }
+
+  /**
+   * Retires the id: forgets the registration (and with it the push target) and every
+   * transaction, answers anyone waiting, tells the approver, and closes its sockets.
+   */
+  async #unregister(): Promise<void> {
+    const all = await this.#deps.storage.list<Transaction>({ prefix: "tx:" });
+    for (const [key, tx] of all) {
+      await this.#deps.storage.delete(key);
+      this.#settle(tx.id, { kind: "final", tx: { ...tx, status: "expired" } });
+    }
+    await this.#deps.storage.put(RETIRED_KEY, { at: this.#now() });
+    await this.#deps.storage.delete(REG_KEY);
+    for (const socket of [...this.#sockets]) {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "unregistered" }));
+        socket.close(4410, "unregistered");
+      }
+    }
+    this.#sockets.clear();
+  }
+
   // --- requester ------------------------------------------------------------
 
   async #submit(request: Request): Promise<Response> {
     const registration = await this.#registration();
-    if (!registration) return unknownSub();
+    if (!registration) return this.#missing();
 
     const body = await readJson(request);
     if (body instanceof Response) return body;
@@ -219,7 +253,7 @@ export class Room {
   }
 
   async #result(request: Request): Promise<Response> {
-    if (!(await this.#registration())) return unknownSub();
+    if (!(await this.#registration())) return this.#missing();
     const url = new URL(request.url);
     const txId = url.searchParams.get("transaction_id");
     if (!txId) {
@@ -294,7 +328,7 @@ export class Room {
 
   async #connect(request: Request): Promise<Response> {
     const registration = await this.#registration();
-    if (!registration) return unknownSub();
+    if (!registration) return this.#missing();
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return problem({
         status: 426,
@@ -402,6 +436,7 @@ export class Room {
     send: (m: ServerMessage) => void,
   ): Promise<void> {
     if (msg.type === "push") return this.#setPush(msg.subscription, send);
+    if (msg.type === "unregister") return this.#unregister();
     if (msg.type === "auth" || typeof msg.txId !== "string") return;
     const tx = await this.#load(msg.txId);
     if (!tx || FINAL_STATUSES.includes(tx.status)) return;
@@ -497,6 +532,13 @@ export class Room {
 
 const unknownSub = () =>
   problem({ status: 404, detail: "No such subscription" });
+
+const retiredSub = () =>
+  problem({
+    status: 410,
+    detail:
+      "This subscription was turned off by its approver. Ask the human for the new URL.",
+  });
 
 async function readJson(request: Request): Promise<unknown | Response> {
   const text = await request.text();

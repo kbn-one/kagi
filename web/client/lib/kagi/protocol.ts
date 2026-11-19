@@ -177,6 +177,8 @@ export type ServerMessage =
   }
   /** Answer to a `push` message, or the stored push subscription was found dead. */
   | { type: "push"; registered: boolean }
+  /** Answer to `unregister`: the id is retired, and the socket closes. */
+  | { type: "unregistered" }
   /** A new transaction, or a change to one. */
   | { type: "tx"; transaction: Transaction }
   /** The requester is waiting: send the result of `txId`. */
@@ -195,7 +197,13 @@ export type ClientMessage =
    * Where to push this approver (`PushSubscription.toJSON()`), replacing what was stored; null
    * stops the pushes.
    */
-  | { type: "push"; subscription: PushSubscriptionJson | null };
+  | { type: "push"; subscription: PushSubscriptionJson | null }
+  /**
+   * Retires this subscription for good: the server forgets the registration, its push target and
+   * its transactions, and refuses the id from then on (410), so a leaked URL cannot be taken over.
+   * Turning notifications off is this; turning them on again registers a new id.
+   */
+  | { type: "unregister" };
 
 /** A push subscription as the browser's `PushSubscription.toJSON()` gives it. */
 export interface PushSubscriptionJson {

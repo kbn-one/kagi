@@ -481,14 +481,21 @@ export const KagiApp = clientEntry(
       handle.update();
     };
 
-    const onForget = () =>
+    /**
+     * Turns notifications off, which retires this subscription: the server forgets it and refuses
+     * its URL from then on (`unregister`). Turning them on again registers a new URL — which is
+     * how the URL is rotated.
+     */
+    const onTurnOff = () =>
       run(async () => {
         if (
           !confirm(
-            "この端末の登録を解除しますか？ この ID へのリクエストは誰も承認できなくなります。",
+            "通知を止めると、いまの受付 URL は使えなくなります（エージェントに渡した説明も無効になります）。もう一度有効にすると新しい URL になります。止めますか？",
           )
         ) return;
-        connection?.close();
+        const conn = connection;
+        if (!conn) throw new Error("サーバーにつながっていません。");
+        await conn.unregister();
         connection = null;
         await forgetSubscription();
         forgetSetup();
@@ -498,14 +505,13 @@ export const KagiApp = clientEntry(
         deleted = new Map();
         sub = null;
         pushOk = false;
+        setStatus(
+          "通知を止め、受付 URL を無効にしました。再開するときは「通知を有効にする」を押してください（新しい URL になります）。",
+          "success",
+        );
       });
 
     const onEnablePush = onSetupPush;
-
-    const onDisablePush = () =>
-      run(async () => {
-        await connection?.disablePush();
-      });
 
     // --- requests -------------------------------------------------------------
 
@@ -707,6 +713,11 @@ export const KagiApp = clientEntry(
           <h2>通知を受け取る</h2>
           <p>
             リクエストが来たら、この端末に通知します。通知を開いて内容を確かめ、パスキーで承認します。
+          </p>
+          <p mix={mutedStyle}>
+            有効にすると、エージェントがリクエストを送る受付 URL
+            がこの端末用に作られます。通知を止めるとその URL
+            は無効になり、もう一度有効にすると新しい URL になります。
           </p>
           {status.support === "denied" || state === "denied"
             ? (
@@ -1407,47 +1418,51 @@ export const KagiApp = clientEntry(
       </section>
     );
 
-    /** 設定: notifications, the requester's side, the passkey, and this phone's registration. */
+    /** 設定: notifications (and so the URL), the requester's side, and the passkey. */
     const settingsTab = (id: string) => (
       <>
         <section mix={cardStyle}>
-          <h2>通知</h2>
-          {connection?.push === "on"
-            ? (
-              <div mix={rowStyle}>
-                <span>オン</span>
-                <button
-                  type="button"
-                  disabled={busy}
-                  mix={[actionStyle, pushEndStyle, on("click", onDisablePush)]}
-                >
-                  通知を止める
-                </button>
-              </div>
-            )
-            : (
-              <div mix={rowStyle}>
-                <span mix={mutedStyle}>
-                  {connection?.push === "denied"
-                    ? "ブロックされています"
-                    : connection?.push === "off"
-                    ? "オフ"
-                    : "使えません"}
-                </span>
-                <button
-                  type="button"
-                  disabled={busy}
-                  mix={[
-                    actionStyle,
-                    primaryStyle,
-                    pushEndStyle,
-                    on("click", onEnablePush),
-                  ]}
-                >
-                  通知を有効にする
-                </button>
-              </div>
+          <h2>通知と受付 URL</h2>
+          <div mix={rowStyle}>
+            <span mix={connection?.push === "on" ? null : mutedStyle}>
+              {connection?.push === "on"
+                ? "通知: オン"
+                : connection?.push === "denied"
+                ? "通知: ブロックされています"
+                : connection?.push === "off"
+                ? "通知: オフ"
+                : "通知: 使えません"}
+            </span>
+            {connection?.push !== "on" && (
+              <button
+                type="button"
+                disabled={busy}
+                mix={[
+                  actionStyle,
+                  primaryStyle,
+                  pushEndStyle,
+                  on("click", onEnablePush),
+                ]}
+              >
+                通知を有効にする
+              </button>
             )}
+          </div>
+          <p mix={mutedStyle}>
+            通知を止めると、いまの受付 URL
+            は使えなくなります。もう一度有効にすると新しい URL
+            になるので、エージェントに説明を渡し直してください。URL
+            が漏れたときは、これで作り直せます。
+          </p>
+          <div mix={rowStyle}>
+            <button
+              type="button"
+              disabled={busy || connection?.state !== "online"}
+              mix={[actionStyle, dangerStyle, on("click", onTurnOff)]}
+            >
+              通知を止める（URL を無効にする）
+            </button>
+          </div>
         </section>
         {requesterSection(id)}
         <section mix={cardStyle}>
@@ -1468,21 +1483,6 @@ export const KagiApp = clientEntry(
               mix={[actionStyle, dangerStyle, on("click", onDeleteVault)]}
             >
               秘密をすべて削除
-            </button>
-          </div>
-        </section>
-        <section mix={cardStyle}>
-          <h2>この端末</h2>
-          <p mix={mutedStyle}>
-            登録を解除すると、この ID へのリクエストは誰も承認できなくなります。
-          </p>
-          <div mix={rowStyle}>
-            <button
-              type="button"
-              disabled={busy}
-              mix={[actionStyle, dangerStyle, on("click", onForget)]}
-            >
-              承認者の登録を解除
             </button>
           </div>
         </section>

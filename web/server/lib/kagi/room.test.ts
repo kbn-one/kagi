@@ -448,3 +448,53 @@ Deno.test("a new push subscription gets a confirmation push, a resent one does n
   await phone.next();
   assertEquals(confirmed, ["https://push.example/1", "https://push.example/2"]);
 });
+
+Deno.test("unregister retires the id: requests, waits, sockets and re-registration all get 410", async () => {
+  const { hub, connect, notified } = await setup();
+  const phone = await connect();
+  await phone.next(); // ready
+  phone.emit({ type: "push", subscription: subscription() });
+  await phone.next(); // push registered
+
+  const { transaction_id: txId } = await (await submit(hub, ghRequest)).json();
+  await phone.next(); // tx
+  const waiting = result(hub, txId);
+  await new Promise((r) => setTimeout(r, 20)); // the requester is waiting now
+
+  phone.emit({ type: "unregister" });
+  assertEquals(await phone.next(), { type: "unregistered" });
+  assertEquals(phone.closed, 4410);
+  // The requester who was waiting is told, not left hanging.
+  assertEquals((await waiting).status, 410);
+
+  const pushedBefore = notified.length;
+  const late = await submit(hub, ghRequest);
+  assertEquals(late.status, 410);
+  assert((await late.json()).detail.includes("new URL"));
+  assertEquals(notified.length, pushedBefore); // nothing pushed for the old id
+  assertEquals((await result(hub, txId)).status, 410);
+  const ws = await hub.dispatch(
+    SUB,
+    "ws",
+    new Request(`${base}/ws`, { headers: { upgrade: "websocket" } }),
+  );
+  assertEquals(ws.status, 410);
+
+  // Nobody can claim the retired id with another key.
+  const other = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const claim = await hub.dispatch(
+    SUB,
+    "register",
+    new Request(base, {
+      method: "PUT",
+      body: JSON.stringify({
+        publicKey: await crypto.subtle.exportKey("jwk", other.publicKey),
+      }),
+    }),
+  );
+  assertEquals(claim.status, 410);
+});

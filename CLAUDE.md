@@ -97,6 +97,13 @@ Web Push は `jsr:@remix-kbn/web-push`（id.kbn.one と共通）で、このサ�
   `subscribePush` して送り直す（鍵が変わっていれば作り直される）。なので購読の
   失効や鍵のローテートは、スマホが `/kagi` を開けば自動で直る。未許可なら
   `/kagi` の「通知を有効にする」ボタン。
+- 受付 URL（`/api/sub/:id`）と通知は一体。「通知を有効にする」が登録（新しい
+  `:id`）と購読を作り、設定タブの「通知を止める」が認証済み WebSocket で
+  `{ type: "unregister" }` を送る。Room は登録・購読・トランザクションを消して
+  `retired` の印を残し、以後その id は req / res / ws / 再登録すべて 410
+  （漏れた古い URL を他人が登録し直して受け取れないように）。スマホは
+  ブラウザーの購読も外し、id と履歴を忘れて準備の「通知」ステップに戻る。 URL
+  のローテートはこの止める → 有効にする。
 - 送信は `lib/kagi/notify.ts`。push サービスが購読の失効（404/410・VAPID
   不一致）を返したら Room が購読を消し、スマホに
   `{ type: "push", registered: false }` を伝える。

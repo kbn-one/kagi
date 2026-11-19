@@ -20,7 +20,10 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   `/api/sub/:id/ws` だけ router の前で hub に渡す。Worker は `WebSocketPair`
   なので router 経由で良い。
 - ブラウザー: `lib/kagi/vault.ts`（パスキー PRF → HKDF → AES-GCM で
-  localStorage）、`device.ts`（subscription と IndexedDB の非 extractable ECDSA
+  localStorage。値は暗号化し、名前・種類・送信先ホスト・App ID は `names` に
+  平文で並べて置く。金庫タブとエージェント向けの説明は閉じたままこれを使う。
+  承認時の判定は復号した中身で行い、`names`
+  は表示専用）、`device.ts`（subscription と IndexedDB の非 extractable ECDSA
   端末鍵）、`connection.ts`（WebSocket。結果はメモリにだけ保持）、
   `substitute.ts`（`[NAME]` の置換、送信先ホスト制限、結果からの秘密の除去）、
   `brief.ts`（AI エージェントに渡す説明。URL 入り、秘密は名前だけ。設定タブの

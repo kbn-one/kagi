@@ -1,25 +1,27 @@
 /**
  * The text an approver pastes into an AI agent so it can use kagi: this subscription's URL, the
  * request shapes, how to wait for the result, and — when the vault is open — the names of the
- * secrets it may ask for. Never a secret's value: the vault is only read for names and hosts.
+ * secrets it may ask for. Never a secret's value: only the vault's clear-text list of names
+ * (`vault.ts`) is read.
  *
  * English and terse on purpose: it goes into a prompt, where every line is paid for.
  */
 
-import type { SecretEntry } from "./substitute.ts";
-import { isAppSecret } from "./substitute.ts";
+import type { SecretSummary } from "./substitute.ts";
 
 export interface BriefOptions {
   /** The subscription URL, `https://…/api/sub/<id>`. */
   base: string;
-  /** The vault's entries, when it is open. Only their names, kinds and hosts are used. */
-  secrets?: Record<string, SecretEntry>;
+  /** The vault's names (`vaultNames()`), with their kinds and hosts. */
+  secrets?: Record<string, SecretSummary> | null;
 }
 
 export function agentBrief({ base, secrets }: BriefOptions): string {
   const entries = Object.entries(secrets ?? {});
-  const apps = entries.filter(([, e]) => isAppSecret(e)).map(([n]) => n);
-  const texts = entries.filter(([, e]) => !isAppSecret(e));
+  const apps = entries.filter(([, e]) => e.kind === "github-app").map(([n]) =>
+    n
+  );
+  const texts = entries.filter(([, e]) => e.kind !== "github-app");
   const app = apps[0] ?? "GH_APP";
   const host = (() => {
     try {
@@ -50,7 +52,7 @@ export function agentBrief({ base, secrets }: BriefOptions): string {
   if (texts.length || apps.length) {
     lines.push("", "Secrets:");
     for (const [name, entry] of texts) {
-      const hosts = isAppSecret(entry) ? [] : entry.hosts;
+      const hosts = entry.kind === "github-app" ? [] : entry.hosts;
       lines.push(
         `- ${name}${hosts.length ? ` (only to ${hosts.join(", ")})` : ""}`,
       );

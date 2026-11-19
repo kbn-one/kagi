@@ -40,6 +40,23 @@ export interface GithubAppSecret {
 export const isAppSecret = (e: SecretEntry): e is GithubAppSecret =>
   e.kind === "github-app";
 
+/**
+ * What can be known about a secret without its value: its kind, where it may be sent, and an App's
+ * ID. Kept in the clear beside the vault (`vault.ts`), so names are always on show.
+ */
+export interface SecretSummary {
+  kind?: "text" | "github-app";
+  hosts: string[];
+  appId?: string;
+}
+
+/** An entry without its value. */
+export function summarizeSecret(entry: SecretEntry): SecretSummary {
+  return isAppSecret(entry)
+    ? { kind: "github-app", hosts: [], appId: entry.appId }
+    : { hosts: [...entry.hosts] };
+}
+
 const fill = (s: string, secrets: Secrets): string =>
   s.replace(PLACEHOLDER, (whole, name: string) => secrets[name] ?? whole);
 

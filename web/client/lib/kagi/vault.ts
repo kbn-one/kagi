@@ -4,14 +4,22 @@
  * The key comes from the WebAuthn PRF extension: on each authentication the authenticator returns
  * HMAC(its per-credential secret, our salt), which never leaves the device unless the user
  * verifies (biometrics / PIN). That output, through HKDF, is the AES-GCM key. So the ciphertext in
- * `localStorage` is useless without the passkey and the user's presence, and nothing about the
- * secrets — names included — is stored in the clear.
+ * `localStorage` is useless without the passkey and the user's presence.
+ *
+ * The names are the exception, on purpose: beside the ciphertext the vault keeps each secret's
+ * name, kind, allowed hosts and (for an App) App ID in the clear (`names`), so the vault tab and
+ * the agent brief can show them without a passkey. Values never are. The list is for display only:
+ * an approval checks the request against the decrypted entries, not against it.
  *
  * PRF needs a recent platform: iOS / iPadOS 18+, Android Chrome, desktop Chrome / Safari with a
  * platform or hybrid authenticator.
  */
 
-import type { SecretEntry } from "./substitute.ts";
+import {
+  type SecretEntry,
+  type SecretSummary,
+  summarizeSecret,
+} from "./substitute.ts";
 
 const STORAGE_KEY = "kagi.vault";
 const INFO = new TextEncoder().encode("kagi vault v1");
@@ -25,7 +33,17 @@ interface StoredVault {
   salt: string;
   iv: string;
   ciphertext: string;
+  /**
+   * Each secret's name and summary, in the clear. Absent in a vault sealed before names were kept;
+   * the next unlock writes it.
+   */
+  names?: Record<string, SecretSummary>;
 }
+
+const summarize = (entries: VaultEntries): Record<string, SecretSummary> =>
+  Object.fromEntries(
+    Object.entries(entries).map(([name, e]) => [name, summarizeSecret(e)]),
+  );
 
 const b64 = (bytes: ArrayBuffer | Uint8Array): string =>
   (bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).toBase64({
@@ -49,6 +67,13 @@ function readStored(): StoredVault | null {
 }
 
 export const hasVault = (): boolean => readStored() !== null;
+
+/**
+ * The secrets' names and summaries, readable without the passkey. `null` with no vault, or with
+ * one sealed before names were kept (until it is next opened).
+ */
+export const vaultNames = (): Record<string, SecretSummary> | null =>
+  readStored()?.names ?? null;
 
 /** Whether this browser can do WebAuthn at all (PRF itself is only known after trying). */
 export const passkeysAvailable = (): boolean =>
@@ -96,6 +121,7 @@ async function seal(
     salt,
     iv: b64(iv),
     ciphertext: b64(ciphertext),
+    names: summarize(entries),
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
 }
@@ -143,6 +169,11 @@ const unlockWith = async (
     entries = JSON.parse(new TextDecoder().decode(plain));
   } catch {
     throw new Error("秘密を復号できませんでした。");
+  }
+  // A vault from before names were kept, or one whose list drifted: put the list right.
+  const names = summarize(entries);
+  if (JSON.stringify(stored.names) !== JSON.stringify(names)) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...stored, names }));
   }
   return {
     entries,

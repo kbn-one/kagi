@@ -102,6 +102,7 @@ import {
 import {
   createVault,
   deleteVault,
+  forgetSecret,
   hasVault,
   passkeysAvailable,
   type UnlockedVault,
@@ -399,10 +400,16 @@ export const KagiApp = clientEntry(
 
     const onRemoveSecret = (name: string) =>
       run(async () => {
-        if (!unlocked || !confirm(`${name} を削除しますか？`)) return;
-        const { [name]: _removed, ...rest } = unlocked.entries;
-        await unlocked.save(rest);
-        unlocked.entries = rest;
+        if (!confirm(`${name} を削除しますか？`)) return;
+        if (unlocked) {
+          const { [name]: _removed, ...rest } = unlocked.entries;
+          await unlocked.save(rest);
+          unlocked.entries = rest;
+        } else {
+          // Closed: off the list and out of every approval now, out of the ciphertext at the next
+          // unlock (`vault.ts`).
+          forgetSecret(name);
+        }
         names = vaultNames();
       });
 
@@ -1149,7 +1156,7 @@ export const KagiApp = clientEntry(
       );
     };
 
-    /** The secrets by name, from the clear-text list; deletable while the vault is open. */
+    /** The secrets by name, from the clear-text list; deletable open or closed. */
     const secretList = () => {
       const list = Object.entries(names ?? {});
       return (
@@ -1166,18 +1173,18 @@ export const KagiApp = clientEntry(
             <li mix={[itemStyle, secretRowStyle]} key={name}>
               <code>[{name}]</code>
               <span mix={mutedStyle}>{describeSecret(entry)}</span>
-              {unlocked && (
-                <button
-                  type="button"
-                  mix={[
-                    actionStyle,
-                    dangerStyle,
-                    on("click", () => void onRemoveSecret(name)),
-                  ]}
-                >
-                  削除
-                </button>
-              )}
+              <button
+                type="button"
+                disabled={busy}
+                mix={[
+                  actionStyle,
+                  dangerStyle,
+                  on("click", () =>
+                    void onRemoveSecret(name)),
+                ]}
+              >
+                削除
+              </button>
             </li>
           ))}
         </ul>
@@ -1333,7 +1340,7 @@ export const KagiApp = clientEntry(
             </div>
             {secretList()}
             <p mix={mutedStyle}>
-              値はこの端末の中にだけ、パスキーで暗号化して保存しています。サーバーには送りません。名前と送信先は暗号化せずに置いているので、閉じていても見えます。
+              値はこの端末の中にだけ、パスキーで暗号化して保存しています。サーバーには送りません。名前と送信先は暗号化せずに置いているので、閉じていても見えます。閉じたまま削除すると、すぐに使えなくなり、値は次にパスキーで開いたときに消えます。
             </p>
           </>
         );

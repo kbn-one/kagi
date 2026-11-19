@@ -11,6 +11,10 @@
  * the agent brief can show them without a passkey. Values never are. The list is for display only:
  * an approval checks the request against the decrypted entries, not against it.
  *
+ * A secret can be deleted without the passkey ({@link forgetSecret}): its name leaves the list and
+ * goes on `removed`, the unlocked vault leaves it out from then on, and the next unlock re-seals
+ * without it, so its value is gone from this device too.
+ *
  * PRF needs a recent platform: iOS / iPadOS 18+, Android Chrome, desktop Chrome / Safari with a
  * platform or hybrid authenticator.
  */
@@ -38,6 +42,11 @@ interface StoredVault {
    * the next unlock writes it.
    */
   names?: Record<string, SecretSummary>;
+  /**
+   * Secrets deleted while the vault was closed. Still in the ciphertext until the next unlock, which
+   * leaves them out and re-seals; never handed out before that.
+   */
+  removed?: string[];
 }
 
 const summarize = (entries: VaultEntries): Record<string, SecretSummary> =>
@@ -170,15 +179,23 @@ const unlockWith = async (
   } catch {
     throw new Error("秘密を復号できませんでした。");
   }
-  // A vault from before names were kept, or one whose list drifted: put the list right.
-  const names = summarize(entries);
-  if (JSON.stringify(stored.names) !== JSON.stringify(names)) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...stored, names }));
+  const save = (next: VaultEntries) =>
+    seal(key, stored.credentialId, stored.salt, next);
+  if (stored.removed?.length) {
+    // Deleted while closed: drop them for good now that the key is here (this also clears
+    // `removed` and rewrites the list).
+    for (const name of stored.removed) delete entries[name];
+    await save(entries);
+  } else if (
+    JSON.stringify(stored.names) !== JSON.stringify(summarize(entries))
+  ) {
+    // A vault from before names were kept, or one whose list drifted: put the list right.
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...stored, names: summarize(entries) }),
+    );
   }
-  return {
-    entries,
-    save: (next) => seal(key, stored.credentialId, stored.salt, next),
-  };
+  return { entries, save };
 };
 
 /** Creates a passkey and an empty vault sealed with it. Replaces any existing vault. */
@@ -228,5 +245,36 @@ export async function unlockVault(): Promise<UnlockedVault> {
   return unlockWith(stored, await prf(stored.credentialId, stored.salt));
 }
 
+/**
+ * Deletes one secret without the passkey. It is gone from the list and from every unlock at once;
+ * its value leaves the ciphertext at the next unlock.
+ */
+export function forgetSecret(name: string): void {
+  const stored = readStored();
+  if (!stored) return;
+  const { [name]: _gone, ...names } = stored.names ?? {};
+  const removed = [...new Set([...(stored.removed ?? []), name])];
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ ...stored, names, removed }),
+  );
+}
+
 /** Forgets the vault on this device. The passkey itself stays in the platform's keychain. */
 export const deleteVault = (): void => localStorage.removeItem(STORAGE_KEY);
+
+/**
+ * The vault without WebAuthn, for tests: seal and open with a PRF output handed in directly.
+ *
+ * @internal
+ */
+export const vaultForTests = {
+  async seal(prfOutput: Uint8Array<ArrayBuffer>, entries: VaultEntries) {
+    await seal(await deriveKey(prfOutput), "test", "c2FsdA", entries);
+  },
+  unlock(prfOutput: Uint8Array<ArrayBuffer>): Promise<UnlockedVault> {
+    const stored = readStored();
+    if (!stored) throw new Error("no vault");
+    return unlockWith(stored, prfOutput.buffer);
+  },
+};

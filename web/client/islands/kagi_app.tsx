@@ -96,17 +96,18 @@ import {
   execute,
   type GithubAppSecret,
   hostOf,
-  isAppSecret,
-  type SecretEntry,
   secretsProblem,
+  type SecretSummary,
 } from "../lib/kagi/substitute.ts";
 import {
   createVault,
   deleteVault,
+  forgetSecret,
   hasVault,
   passkeysAvailable,
   type UnlockedVault,
   unlockVault,
+  vaultNames,
 } from "../lib/kagi/vault.ts";
 
 type AlertKind = "info" | "success" | "warning" | "error";
@@ -161,6 +162,8 @@ export const KagiApp = clientEntry(
     let vaultExists = false;
     /** Held only while the secrets card is open for editing. */
     let unlocked: UnlockedVault | null = null;
+    /** The secrets' names, in the clear beside the vault: shown even while it is closed. */
+    let names: Record<string, SecretSummary> | null = null;
 
     let sub: Subscription | null = null;
     /** Launched from the home screen. */
@@ -252,6 +255,7 @@ export const KagiApp = clientEntry(
         if (handle.signal.aborted) return;
         passkeys = passkeysAvailable();
         vaultExists = hasVault();
+        names = vaultNames();
         sub = readSubscription();
         standalone = device().isStandalone;
         browserMode = browserModeChosen();
@@ -291,6 +295,7 @@ export const KagiApp = clientEntry(
         ) return;
         unlocked = await createVault();
         vaultExists = true;
+        names = vaultNames();
         goTo("vault");
         setStatus(
           "パスキーを作成しました。最初の秘密を追加してください。",
@@ -301,6 +306,7 @@ export const KagiApp = clientEntry(
     const onUnlock = () =>
       run(async () => {
         unlocked = await unlockVault();
+        names = vaultNames();
       });
 
     const onLock = () => {
@@ -323,6 +329,7 @@ export const KagiApp = clientEntry(
         const entries = { ...unlocked.entries, [name]: { value, hosts } };
         await unlocked.save(entries);
         unlocked.entries = entries;
+        names = vaultNames();
         if (nameInput) nameInput.value = "";
         if (valueInput) valueInput.value = "";
         if (hostsInput) hostsInput.value = "";
@@ -381,6 +388,7 @@ export const KagiApp = clientEntry(
         const entries = { ...unlocked.entries, [name]: app };
         await unlocked.save(entries);
         unlocked.entries = entries;
+        names = vaultNames();
         if (appNameInput) appNameInput.value = "";
         if (appIdInput) appIdInput.value = "";
         if (appKeyInput) appKeyInput.value = "";
@@ -392,10 +400,17 @@ export const KagiApp = clientEntry(
 
     const onRemoveSecret = (name: string) =>
       run(async () => {
-        if (!unlocked || !confirm(`${name} を削除しますか？`)) return;
-        const { [name]: _removed, ...rest } = unlocked.entries;
-        await unlocked.save(rest);
-        unlocked.entries = rest;
+        if (!confirm(`${name} を削除しますか？`)) return;
+        if (unlocked) {
+          const { [name]: _removed, ...rest } = unlocked.entries;
+          await unlocked.save(rest);
+          unlocked.entries = rest;
+        } else {
+          // Closed: off the list and out of every approval now, out of the ciphertext at the next
+          // unlock (`vault.ts`).
+          forgetSecret(name);
+        }
+        names = vaultNames();
       });
 
     const onDeleteVault = () => {
@@ -403,6 +418,7 @@ export const KagiApp = clientEntry(
       deleteVault();
       vaultExists = false;
       unlocked = null;
+      names = null;
       handle.update();
     };
 
@@ -1140,30 +1156,40 @@ export const KagiApp = clientEntry(
       );
     };
 
-    const secretList = (unlocked: UnlockedVault) => (
-      <ul mix={listStyle}>
-        {Object.keys(unlocked.entries).length === 0 && (
-          <li mix={mutedStyle}>まだ秘密がありません。</li>
-        )}
-        {Object.entries(unlocked.entries).map(([name, entry]) => (
-          <li mix={[itemStyle, secretRowStyle]} key={name}>
-            <code>[{name}]</code>
-            <span mix={mutedStyle}>{describeSecret(entry)}</span>
-            <button
-              type="button"
-              mix={[
-                actionStyle,
-                dangerStyle,
-                on("click", () =>
-                  void onRemoveSecret(name)),
-              ]}
-            >
-              削除
-            </button>
-          </li>
-        ))}
-      </ul>
-    );
+    /** The secrets by name, from the clear-text list; deletable open or closed. */
+    const secretList = () => {
+      const list = Object.entries(names ?? {});
+      return (
+        <ul mix={listStyle}>
+          {names === null && (
+            <li mix={mutedStyle}>
+              名前は一度パスキーで開くと、閉じていても表示されます。
+            </li>
+          )}
+          {names !== null && list.length === 0 && (
+            <li mix={mutedStyle}>まだ秘密がありません。</li>
+          )}
+          {list.map(([name, entry]) => (
+            <li mix={[itemStyle, secretRowStyle]} key={name}>
+              <code>[{name}]</code>
+              <span mix={mutedStyle}>{describeSecret(entry)}</span>
+              <button
+                type="button"
+                disabled={busy}
+                mix={[
+                  actionStyle,
+                  dangerStyle,
+                  on("click", () =>
+                    void onRemoveSecret(name)),
+                ]}
+              >
+                削除
+              </button>
+            </li>
+          ))}
+        </ul>
+      );
+    };
 
     const addSecretCard = () => (
       <section mix={cardStyle}>
@@ -1276,7 +1302,7 @@ export const KagiApp = clientEntry(
       </section>
     );
 
-    /** 金庫: the secrets, sealed until the passkey opens them. */
+    /** 金庫: the secrets by name, always; their values only once the passkey opens them. */
     const vaultTab = () =>
       unlocked
         ? (
@@ -1290,33 +1316,39 @@ export const KagiApp = clientEntry(
                 閉じる
               </button>
             </div>
-            {secretList(unlocked)}
+            {secretList()}
             {addSecretCard()}
             {addAppCard()}
           </>
         )
         : (
-          <section mix={cardStyle}>
-            <h2>閉じています</h2>
-            <p mix={mutedStyle}>
-              秘密はこの端末の中にだけ、パスキーで暗号化して保存しています。サーバーには送りません。
-            </p>
+          <>
             <div mix={rowStyle}>
+              <span mix={mutedStyle}>閉じています</span>
               <button
                 type="button"
                 disabled={busy}
-                mix={[actionStyle, primaryStyle, on("click", onUnlock)]}
+                mix={[
+                  actionStyle,
+                  primaryStyle,
+                  pushEndStyle,
+                  on("click", onUnlock),
+                ]}
               >
                 パスキーで開いて編集
               </button>
             </div>
-          </section>
+            {secretList()}
+            <p mix={mutedStyle}>
+              値はこの端末の中にだけ、パスキーで暗号化して保存しています。サーバーには送りません。名前と送信先は暗号化せずに置いているので、閉じていても見えます。閉じたまま削除すると、すぐに使えなくなり、値は次にパスキーで開いたときに消えます。
+            </p>
+          </>
         );
 
     const brief = (id: string) =>
       agentBrief({
         base: endpoint(routes.api.sub.register.href({ id })),
-        secrets: unlocked?.entries,
+        secrets: names,
       });
 
     const onCopyBrief = (id: string) =>
@@ -1350,12 +1382,14 @@ export const KagiApp = clientEntry(
           </button>
         </div>
         <p mix={mutedStyle}>
-          {unlocked ? "秘密の名前も含めています（値は含みません）。" : (
-            <>
-              秘密の名前も入れるなら、先に<a href="#vault">金庫</a>
-              をパスキーで開いてからコピーしてください。
-            </>
-          )}
+          {names === null
+            ? (
+              <>
+                秘密の名前を入れるには、一度<a href="#vault">金庫</a>
+                をパスキーで開いてください（以後は開かなくても入ります）。
+              </>
+            )
+            : "金庫の秘密の名前も含めています（値は含みません）。"}
         </p>
         <details mix={foldStyle}>
           <summary>内容を見る</summary>
@@ -1571,8 +1605,8 @@ function createRepoDetails(req: GithubCreateRepoRequest) {
   );
 }
 
-function describeSecret(entry: SecretEntry): string {
-  if (isAppSecret(entry)) return ` → GitHub App (ID ${entry.appId})`;
+function describeSecret(entry: SecretSummary): string {
+  if (entry.kind === "github-app") return ` → GitHub App (ID ${entry.appId})`;
   return entry.hosts.length
     ? ` → ${entry.hosts.join(", ")} のみ`
     : " → 送信先の制限なし";

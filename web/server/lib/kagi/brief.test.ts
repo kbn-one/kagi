@@ -1,6 +1,10 @@
 import { assert, assertStringIncludes } from "@std/assert";
 
 import { agentBrief } from "../../../client/lib/kagi/brief.ts";
+import {
+  type SecretEntry,
+  summarizeSecret,
+} from "../../../client/lib/kagi/substitute.ts";
 
 const base = "https://kagi.kbn.one/api/sub/abcdefghijklmnopqrstuv";
 
@@ -19,19 +23,21 @@ Deno.test("the agent brief carries the endpoint and every request shape", () => 
   );
 });
 
-Deno.test("with the vault open it names the secrets, never their values", () => {
-  const text = agentBrief({
-    base,
-    secrets: {
-      GH_SECRET: { value: "ghp_supersecret", hosts: ["api.github.com"] },
-      MY_APP: {
-        kind: "github-app",
-        appId: "123",
-        value: "-----BEGIN RSA PRIVATE KEY-----x",
-        hosts: [],
-      },
+Deno.test("it names the vault's secrets from their summaries, which carry no values", () => {
+  const entries: Record<string, SecretEntry> = {
+    GH_SECRET: { value: "ghp_supersecret", hosts: ["api.github.com"] },
+    MY_APP: {
+      kind: "github-app",
+      appId: "123",
+      value: "-----BEGIN RSA PRIVATE KEY-----x",
+      hosts: [],
     },
-  });
+  };
+  const summaries = Object.fromEntries(
+    Object.entries(entries).map(([n, e]) => [n, summarizeSecret(e)]),
+  );
+  assert(!JSON.stringify(summaries).includes("supersecret"));
+  const text = agentBrief({ base, secrets: summaries });
   assertStringIncludes(text, "- GH_SECRET (only to api.github.com)");
   assertStringIncludes(text, "- MY_APP: GitHub App");
   assertStringIncludes(text, '"app":"MY_APP"');

@@ -138,6 +138,11 @@ export type TxStatus =
   | "failed"
   | "expired";
 
+/** A request nobody decided on in this long is `expired`. */
+export const PENDING_TTL_MS = 10 * 60_000;
+/** The server forgets a transaction this long after it arrived. */
+export const TX_RETENTION_MS = 60 * 60_000;
+
 export const FINAL_STATUSES: readonly TxStatus[] = [
   "delivered",
   "rejected",
@@ -160,7 +165,8 @@ export type ServerMessage =
   /** First message on every connection: sign it to prove you hold the device key. */
   | { type: "challenge"; nonce: string }
   /**
-   * After a good `auth`: every transaction that is not final yet, the key to subscribe to push with
+   * After a good `auth`: every transaction the server still keeps (finished ones too, for the
+   * phone's history), the key to subscribe to push with
    * (null when the server sends none), and whether this subscription has a push subscription stored.
    */
   | {

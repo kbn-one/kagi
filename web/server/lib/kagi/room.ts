@@ -17,8 +17,10 @@ import {
   FINAL_STATUSES,
   type KagiResult,
   parseKagiRequest,
+  PENDING_TTL_MS,
   type ServerMessage,
   type Transaction,
+  TX_RETENTION_MS,
   type TxStatus,
 } from "../../../client/lib/kagi/protocol.ts";
 import { parsePushSubscription } from "@remix-kbn/web-push";
@@ -59,10 +61,7 @@ export interface Registration {
 /** Longest a `GET /res` may wait, and its default. */
 export const MAX_WAIT_SECONDS = 55;
 export const DEFAULT_WAIT_SECONDS = 25;
-/** A request nobody decided on in this long is `expired`. */
-export const PENDING_TTL_MS = 10 * 60_000;
-/** Anything older than this is forgotten. */
-export const TX_RETENTION_MS = 60 * 60_000;
+export { PENDING_TTL_MS, TX_RETENTION_MS };
 export const MAX_OPEN_TRANSACTIONS = 20;
 export const MAX_REQUEST_BYTES = 64 * 1024;
 
@@ -333,17 +332,16 @@ export class Room {
           }
           authed = true;
           this.#sockets.add(socket);
-          const open = (await this.#transactions()).filter((t) =>
-            !FINAL_STATUSES.includes(t.status)
-          );
+          // Everything still kept, finished ones too: the phone keeps its own history of them.
+          const kept = await this.#transactions();
           send({
             type: "ready",
-            transactions: open,
+            transactions: kept,
             applicationServerKey: await this.#applicationServerKey(),
             push: !!(await this.#registration())?.push,
           });
           // A requester may have been waiting while the phone was away.
-          for (const t of open) {
+          for (const t of kept) {
             if (t.status === "done" && this.#waiters.has(t.id)) {
               send({ type: "get", txId: t.id });
             }

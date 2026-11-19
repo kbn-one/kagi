@@ -199,6 +199,25 @@ Deno.test("a result finished before anyone asked is fetched from the phone on GE
   assertEquals((await (await waiting).json()).response.status, 204);
 });
 
+Deno.test("a reconnecting phone is sent finished transactions too, for its history", async () => {
+  const { hub, connect } = await setup();
+  const first = await connect();
+  await first.next(); // ready
+  const { transaction_id: txId } = await (await submit(hub, ghRequest)).json();
+  await first.next(); // tx
+  first.emit({ type: "decision", txId, approved: false });
+  assertEquals((await first.next()).type, "tx"); // rejected
+  first.close();
+
+  const second = await connect();
+  const ready = await second.next();
+  assert(ready.type === "ready");
+  assertEquals(
+    ready.transactions.map((t) => [t.id, t.status]),
+    [[txId, "rejected"]],
+  );
+});
+
 Deno.test("a phone that reconnects is asked for results a requester is waiting on", async () => {
   const { hub, connect } = await setup();
   const first = await connect();

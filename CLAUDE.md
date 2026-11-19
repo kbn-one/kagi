@@ -30,6 +30,13 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   （`#settings`）の 3 タブ。タブは hash のリンクで、`navigation-guard.ts` が
   ランタイムに横取りさせない。`/kagi` はページの `frame = "app"` で
   サイトのヘッダー・フッター無しの全画面（`layout.tsx`）。
+- 承認タブの履歴は `lib/kagi/history.ts`:
+  スマホが見たトランザクション（リクエスト と結末。結果は保存しない）を
+  localStorage に持つ。サーバーは 1 時間で忘れ、
+  接続のたびに残っている分を終わったものも含めて `ready` で送る。終わったものは
+  `yyyy-mm-dd HH:mm` の 1 行に畳む。削除は削除モードで、行を横にスワイプして
+  上下になぞると範囲選択（行は `touch-action: pan-y`）。削除した id はサーバーが
+  忘れるまで覚えておき、送り直されても戻さない。
 - リクエストは 4 種類（`protocol.ts` の `KagiRequest`）。
   - `http`（既定）: `[NAME]` を埋めて API を呼ぶ。
   - `github-app-token`: GitHub App の installation token を指定リポジトリ・指定

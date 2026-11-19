@@ -51,6 +51,19 @@ import {
   pushStatus,
 } from "../lib/kagi/setup.ts";
 import { agentBrief } from "../lib/kagi/brief.ts";
+import {
+  clearHistory,
+  formatTime,
+  isPast,
+  mergeHistory,
+  readDeleted,
+  readHistory,
+  removeFromHistory,
+  selectRange,
+  shownStatus,
+  writeDeleted,
+  writeHistory,
+} from "../lib/kagi/history.ts";
 import { connect, type KagiConnection } from "../lib/kagi/connection.ts";
 import {
   createSubscription,
@@ -157,6 +170,28 @@ export const KagiApp = clientEntry(
     /** Notifications have worked once on this phone. */
     let pushOk = false;
     let connection: KagiConnection | null = null;
+    /** Every request this phone has seen, newest first (`lib/kagi/history.ts`). */
+    let history: Transaction[] = [];
+    /** Deleted entries the server may still send (`lib/kagi/history.ts`). */
+    let deleted = new Map<string, number>();
+    /** Choosing history entries to delete. */
+    let deleting = false;
+    let selected = new Set<string>();
+    /** The past entries' ids in the order last rendered: what a swipe's row numbers mean. */
+    let pastIds: string[] = [];
+    /**
+     * A finger on a history row in delete mode. It becomes a range selection once it moves
+     * sideways (`active`); moving up or down first is a scroll, which the browser takes over.
+     */
+    let swipe: {
+      pointerId: number;
+      x: number;
+      y: number;
+      anchor: number;
+      select: boolean;
+      base: Set<string>;
+      active: boolean;
+    } | null = null;
     /** The tab on show, from the URL's hash (read after hydration, like the rest). */
     let tab: Tab = "approve";
     const focusTx = isClientEnv
@@ -198,6 +233,14 @@ export const KagiApp = clientEntry(
             markPushDone();
             pushOk = true;
           }
+          if (connection?.transactions.size) {
+            history = mergeHistory(
+              history,
+              connection.transactions.values(),
+              deleted,
+            );
+            writeHistory(history);
+          }
           handle.update();
         })
         : null;
@@ -214,6 +257,9 @@ export const KagiApp = clientEntry(
         browserMode = browserModeChosen();
         pushOk = pushDone();
         tab = tabOf(location.hash);
+        history = readHistory();
+        deleted = readDeleted();
+        writeDeleted(deleted);
         loaded = true;
         startConnection();
         handle.update();
@@ -430,6 +476,10 @@ export const KagiApp = clientEntry(
         connection = null;
         await forgetSubscription();
         forgetSetup();
+        // The history is this registration's; a new one starts empty.
+        clearHistory();
+        history = [];
+        deleted = new Map();
         sub = null;
         pushOk = false;
       });
@@ -766,87 +816,326 @@ export const KagiApp = clientEntry(
       );
     };
 
-    const pendingCount = () =>
-      connection
-        ? [...connection.transactions.values()].filter((tx) =>
-          tx.status === "pending"
-        ).length
-        : 0;
+    const pendingCount = () => {
+      const now = Date.now();
+      return history.filter((tx) => shownStatus(tx, now) === "pending").length;
+    };
 
-    /** 承認: the requests, newest first. */
-    const approveTab = () => {
-      const txs = connection
-        ? [...connection.transactions.values()].sort((a, b) =>
-          b.createdAt - a.createdAt
+    // --- history: deleting -------------------------------------------------------
+
+    const startDeleting = () => {
+      deleting = true;
+      selected = new Set();
+      handle.update();
+    };
+
+    const stopDeleting = () => {
+      deleting = false;
+      selected = new Set();
+      swipe = null;
+      handle.update();
+    };
+
+    const onSelectAll = () => {
+      selected = selected.size === pastIds.length
+        ? new Set()
+        : new Set(pastIds);
+      handle.update();
+    };
+
+    const onDeleteSelected = () => {
+      if (selected.size === 0) return;
+      if (!confirm(`履歴 ${selected.size} 件を削除しますか？`)) return;
+      ({ history, deleted } = removeFromHistory(history, selected, deleted));
+      writeHistory(history);
+      writeDeleted(deleted);
+      stopDeleting();
+    };
+
+    /**
+     * The row at height `y` in `list`, by the rows' positions rather than by what is under the
+     * finger (which may be the tab bar). Above the first row is the first, below the last the last.
+     */
+    const rowIndexAt = (list: Element, y: number): number | null => {
+      const rows = [
+        ...list.querySelectorAll<HTMLElement>("[data-history-index]"),
+      ];
+      if (rows.length === 0) return null;
+      for (const row of rows) {
+        if (y < row.getBoundingClientRect().bottom) {
+          return Number(row.dataset.historyIndex);
+        }
+      }
+      return Number(rows[rows.length - 1].dataset.historyIndex);
+    };
+
+    const onSwipeStart = (event: PointerEvent) => {
+      if (!deleting || swipe) return;
+      const row = (event.target as Element).closest("[data-history-index]");
+      if (!row) return;
+      const anchor = Number((row as HTMLElement).dataset.historyIndex);
+      swipe = {
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        anchor,
+        select: !selected.has(pastIds[anchor]),
+        base: new Set(selected),
+        active: false,
+      };
+    };
+
+    const onSwipeMove = (event: PointerEvent) => {
+      if (!swipe || event.pointerId !== swipe.pointerId) return;
+      if (!swipe.active) {
+        const dx = Math.abs(event.clientX - swipe.x);
+        const dy = Math.abs(event.clientY - swipe.y);
+        if (dx < 8 && dy < 8) return;
+        if (dy >= dx) {
+          // A scroll: the rows are `touch-action: pan-y`, so the browser has it.
+          swipe = null;
+          return;
+        }
+        swipe.active = true;
+        (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+      }
+      const current = rowIndexAt(
+        event.currentTarget as Element,
+        event.clientY,
+      );
+      if (current === null) return;
+      selected = selectRange(
+        swipe.base,
+        pastIds,
+        swipe.anchor,
+        current,
+        swipe.select,
+      );
+      handle.update();
+    };
+
+    const onSwipeEnd = (event: PointerEvent) => {
+      if (!swipe || event.pointerId !== swipe.pointerId) return;
+      if (!swipe.active) {
+        // A tap: just that row.
+        selected = selectRange(
+          swipe.base,
+          pastIds,
+          swipe.anchor,
+          swipe.anchor,
+          swipe.select,
+        );
+      }
+      swipe = null;
+      handle.update();
+    };
+
+    const onSwipeCancel = () => {
+      swipe = null;
+    };
+
+    // --- 承認 -------------------------------------------------------------------
+
+    const requestDetails = (tx: Transaction) => (
+      <dl mix={detailsStyle}>
+        {isAppTokenRequest(tx.request)
+          ? appTokenDetails(tx.request)
+          : isGithubApiRequest(tx.request)
+          ? githubApiDetails(tx.request)
+          : isCreateRepoRequest(tx.request)
+          ? createRepoDetails(tx.request)
+          : httpDetails(tx.request)}
+        <dt>受付</dt>
+        <dd>{formatTime(tx.createdAt)}</dd>
+        {tx.error && (
+          <>
+            <dt>エラー</dt>
+            <dd>{tx.error}</dd>
+          </>
+        )}
+      </dl>
+    );
+
+    const statusBadge = (status: TxStatus) => (
+      <span mix={badgeStyle} data-status={status}>
+        {STATUS_LABEL[status]}
+      </span>
+    );
+
+    /** A request still in play: everything about it, and the buttons while it waits. */
+    const openItem = (tx: Transaction, now: number) => {
+      const status = shownStatus(tx, now);
+      return (
+        <li
+          key={tx.id}
+          mix={[itemStyle, tx.id === focusTx ? focusStyle : null]}
+        >
+          <div mix={rowStyle}>
+            <strong>{headingOf(tx.request)[0]}</strong>
+            <strong mix={hostStyle}>{headingOf(tx.request)[1]}</strong>
+            {statusBadge(status)}
+          </div>
+          {requestDetails(tx)}
+          {status === "pending" && (
+            <div mix={rowStyle}>
+              <button
+                type="button"
+                disabled={busy || connection?.state !== "online"}
+                mix={[
+                  actionStyle,
+                  primaryStyle,
+                  on("click", () => void onApprove(tx)),
+                ]}
+              >
+                パスキーで承認して実行
+              </button>
+              <button
+                type="button"
+                disabled={connection?.state !== "online"}
+                mix={[
+                  actionStyle,
+                  dangerStyle,
+                  on("click", () => onReject(tx)),
+                ]}
+              >
+                拒否
+              </button>
+            </div>
+          )}
+        </li>
+      );
+    };
+
+    /** The one line a finished request folds to: when, what, how it ended. */
+    const pastSummary = (tx: Transaction, now: number) => (
+      <>
+        <time mix={timeStyle} dateTime={new Date(tx.createdAt).toISOString()}>
+          {formatTime(tx.createdAt)}
+        </time>
+        <span mix={pastTitleStyle}>
+          <strong>{headingOf(tx.request)[0]}</strong>{" "}
+          <span mix={hostStyle}>{headingOf(tx.request)[1]}</span>
+        </span>
+        {statusBadge(shownStatus(tx, now))}
+      </>
+    );
+
+    const pastItem = (tx: Transaction, index: number, now: number) =>
+      deleting
+        ? (
+          <li
+            key={tx.id}
+            data-history-index={String(index)}
+            aria-selected={selected.has(tx.id) ? "true" : "false"}
+            mix={[pastRowStyle, selectableStyle]}
+          >
+            <span mix={checkStyle} aria-hidden="true" />
+            {pastSummary(tx, now)}
+          </li>
         )
-        : [];
+        : (
+          <li key={tx.id}>
+            <details mix={pastFoldStyle}>
+              <summary mix={pastRowStyle}>{pastSummary(tx, now)}</summary>
+              {requestDetails(tx)}
+            </details>
+          </li>
+        );
+
+    /** 承認: the requests still in play, then the history, folded. */
+    const approveTab = () => {
+      const now = Date.now();
+      const open = history.filter((tx) => !isPast(tx, now));
+      const past = history.filter((tx) => isPast(tx, now));
+      pastIds = past.map((tx) => tx.id);
+      if (deleting && past.length === 0) deleting = false;
       return (
         <>
           {statusLine()}
-          {txs.length === 0 && (
+          {open.length === 0 && (
             <p mix={[mutedStyle, emptyStyle]}>
               承認待ちのリクエストはありません。来たら通知します。
             </p>
           )}
-          <ul mix={listStyle}>
-            {txs.map((tx) => (
-              <li
-                key={tx.id}
-                mix={[itemStyle, tx.id === focusTx ? focusStyle : null]}
-              >
-                <div mix={rowStyle}>
-                  <strong>{headingOf(tx.request)[0]}</strong>
-                  <strong mix={hostStyle}>{headingOf(tx.request)[1]}</strong>
-                  <span mix={badgeStyle} data-status={tx.status}>
-                    {STATUS_LABEL[tx.status]}
-                  </span>
-                </div>
-                <dl mix={detailsStyle}>
-                  {isAppTokenRequest(tx.request)
-                    ? appTokenDetails(tx.request)
-                    : isGithubApiRequest(tx.request)
-                    ? githubApiDetails(tx.request)
-                    : isCreateRepoRequest(tx.request)
-                    ? createRepoDetails(tx.request)
-                    : httpDetails(tx.request)}
-                  <dt>受付</dt>
-                  <dd>{new Date(tx.createdAt).toLocaleString()}</dd>
-                  {tx.error && (
+          <ul mix={listStyle}>{open.map((tx) => openItem(tx, now))}</ul>
+          {past.length > 0 && (
+            <section aria-label="履歴">
+              <div mix={historyHeadStyle}>
+                <h2>履歴</h2>
+                {deleting
+                  ? (
                     <>
-                      <dt>エラー</dt>
-                      <dd>{tx.error}</dd>
+                      <button
+                        type="button"
+                        mix={[actionStyle, on("click", stopDeleting)]}
+                      >
+                        キャンセル
+                      </button>
+                      <button
+                        type="button"
+                        disabled={selected.size === 0}
+                        mix={[
+                          actionStyle,
+                          dangerStyle,
+                          on("click", onDeleteSelected),
+                        ]}
+                      >
+                        {selected.size ? `${selected.size} 件を削除` : "削除"}
+                      </button>
                     </>
+                  )
+                  : (
+                    <button
+                      type="button"
+                      mix={[actionStyle, on("click", startDeleting)]}
+                    >
+                      選択して削除
+                    </button>
                   )}
-                </dl>
-                {tx.status === "pending" && (
-                  <div mix={rowStyle}>
-                    <button
-                      type="button"
-                      disabled={busy || connection?.state !== "online"}
-                      mix={[
-                        actionStyle,
-                        primaryStyle,
-                        on("click", () => void onApprove(tx)),
-                      ]}
-                    >
-                      パスキーで承認して実行
-                    </button>
-                    <button
-                      type="button"
-                      disabled={connection?.state !== "online"}
-                      mix={[
-                        actionStyle,
-                        dangerStyle,
-                        on("click", () => onReject(tx)),
-                      ]}
-                    >
-                      拒否
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+              </div>
+              {deleting && (
+                <p mix={mutedStyle}>
+                  行を横にスワイプして、そのまま上下になぞると範囲を選べます。タップで
+                  1 件ずつ。{" "}
+                  <button
+                    type="button"
+                    mix={[linkButtonStyle, on("click", onSelectAll)]}
+                  >
+                    {selected.size === past.length
+                      ? "選択を解除"
+                      : "すべて選択"}
+                  </button>
+                </p>
+              )}
+              <ul
+                mix={[
+                  pastListStyle,
+                  deleting
+                    ? [
+                      on<HTMLUListElement, "pointerdown">(
+                        "pointerdown",
+                        onSwipeStart,
+                      ),
+                      on<HTMLUListElement, "pointermove">(
+                        "pointermove",
+                        onSwipeMove,
+                      ),
+                      on<HTMLUListElement, "pointerup">(
+                        "pointerup",
+                        onSwipeEnd,
+                      ),
+                      on<HTMLUListElement, "pointercancel">(
+                        "pointercancel",
+                        onSwipeCancel,
+                      ),
+                    ]
+                    : null,
+                ]}
+              >
+                {past.map((tx, i) => pastItem(tx, i, now))}
+              </ul>
+            </section>
+          )}
         </>
       );
     };
@@ -1443,6 +1732,84 @@ const secretRowStyle = css({
 });
 
 const focusStyle = css({ borderColor: color.accent, borderWidth: "2px" });
+
+const historyHeadStyle = css({
+  display: "flex",
+  alignItems: "center",
+  gap: "0.5rem",
+  marginBlock: "1.5rem 0.5rem",
+  "& h2": { margin: 0, marginInlineEnd: "auto", fontSize: "1.2rem" },
+});
+
+const pastListStyle = css({
+  listStyle: "none",
+  padding: 0,
+  margin: 0,
+  border: `1px solid ${color.border}`,
+  borderRadius: radius.md,
+  overflow: "hidden",
+  "& > li + li": { borderTop: `1px solid ${color.border}` },
+});
+
+/** One folded history entry: date, what it was, how it ended. */
+const pastRowStyle = css({
+  display: "grid",
+  gridTemplateColumns: "auto 1fr auto",
+  alignItems: "center",
+  gap: "0.6rem",
+  padding: "0.55rem 0.8rem",
+  fontSize: "0.85rem",
+  cursor: "pointer",
+  listStyle: "none",
+  "&::-webkit-details-marker": { display: "none" },
+});
+
+const timeStyle = css({
+  color: color.muted,
+  fontVariantNumeric: "tabular-nums",
+  whiteSpace: "nowrap",
+});
+
+const pastTitleStyle = css({
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+const pastFoldStyle = css({
+  "&[open] > summary": { borderBottom: `1px solid ${color.border}` },
+  "& > dl": { padding: "0 0.8rem 0.6rem" },
+});
+
+/**
+ * A row in delete mode. `pan-y` leaves vertical swipes to scrolling and hands sideways ones to the
+ * page, which turns them into a range selection.
+ */
+const selectableStyle = css({
+  gridTemplateColumns: "auto auto 1fr auto",
+  touchAction: "pan-y",
+  userSelect: "none",
+  WebkitUserSelect: "none",
+  WebkitTouchCallout: "none",
+  "&[aria-selected=true]": {
+    background: "color-mix(in srgb, #dc2626 12%, transparent)",
+  },
+  "&[aria-selected=true] > span:first-child": {
+    borderColor: "#dc2626",
+    background:
+      "#dc2626 url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\") center / 100% no-repeat",
+  },
+});
+
+/** The round tick in front of a row in delete mode; filled by {@link selectableStyle}. */
+const checkStyle = css({
+  width: "1.15rem",
+  height: "1.15rem",
+  borderRadius: "999px",
+  border: `1.5px solid ${color.muted}`,
+  boxSizing: "border-box",
+});
 
 const hostStyle = css({ fontFamily: font.mono, wordBreak: "break-all" });
 

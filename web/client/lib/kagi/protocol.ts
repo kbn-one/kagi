@@ -14,12 +14,15 @@
  */
 
 /**
- * What a requester asks for: an HTTP call made with secrets ({@link HttpRequest}), or a short-lived
- * GitHub token limited to named repositories ({@link GithubAppTokenRequest}).
+ * What a requester asks for: an HTTP call made with secrets ({@link HttpRequest}), a short-lived
+ * GitHub token limited to named repositories ({@link GithubAppTokenRequest}), a GitHub API call
+ * made as the App without the token leaving the phone ({@link GithubApiRequest}), or a new
+ * repository ({@link GithubCreateRepoRequest}).
  */
 export type KagiRequest =
   | HttpRequest
   | GithubAppTokenRequest
+  | GithubApiRequest
   | GithubCreateRepoRequest;
 
 /** An API call for the approver to make. `[NAME]` in a string is replaced by secret NAME. */
@@ -53,6 +56,27 @@ export interface GithubAppTokenRequest {
 }
 
 /**
+ * One GitHub REST API call, made on the approver's phone as the App (vault secret `app`).
+ *
+ * The phone mints a token limited exactly as a {@link GithubAppTokenRequest} would be, calls
+ * `https://api.github.com` + `path` with it, and revokes it. The requester receives the API's
+ * answer, never the token: no token to hand back, and no second call to make with it.
+ */
+export interface GithubApiRequest {
+  type: "github-api";
+  app: string;
+  owner: string;
+  repositories: string[];
+  permissions: Record<string, "read" | "write">;
+  /** Defaults to `GET`, or `POST` when there is a body. */
+  method?: string;
+  /** The path on `api.github.com`, with its query: `/repos/OWNER/REPO/issues?state=open`. */
+  path: string;
+  /** A JSON value, sent as JSON. */
+  body?: unknown;
+}
+
+/**
  * A new repository, created on the approver's phone with the App (vault secret `app`). The token
  * that creates it never leaves the phone; the requester receives the new repository's names and
  * URLs. Pushing to it is a separate {@link GithubAppTokenRequest}, approved on its own.
@@ -75,6 +99,10 @@ export interface GithubCreateRepoRequest {
 export const isAppTokenRequest = (
   req: KagiRequest,
 ): req is GithubAppTokenRequest => req.type === "github-app-token";
+
+export const isGithubApiRequest = (
+  req: KagiRequest,
+): req is GithubApiRequest => req.type === "github-api";
 
 export const isCreateRepoRequest = (
   req: KagiRequest,
@@ -196,7 +224,7 @@ export function placeholdersIn(value: unknown, out = new Set<string>()) {
 }
 
 /** The HTTP method a request will be made with. */
-export const methodOf = (req: HttpRequest): string =>
+export const methodOf = (req: HttpRequest | GithubApiRequest): string =>
   (req.method ?? (req.body === undefined ? "GET" : "POST")).toUpperCase();
 
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
@@ -214,9 +242,10 @@ export function parseKagiRequest(value: unknown): KagiRequest | string {
   }
   const v = value as Record<string, unknown>;
   if (v.type === "github-app-token") return parseAppTokenRequest(v);
+  if (v.type === "github-api") return parseGithubApiRequest(v);
   if (v.type === "github-create-repo") return parseCreateRepoRequest(v);
   if (v.type !== undefined && v.type !== "http") {
-    return 'type must be "http", "github-app-token" or "github-create-repo"';
+    return 'type must be "http", "github-app-token", "github-api" or "github-create-repo"';
   }
 
   if (
@@ -291,9 +320,15 @@ const GITHUB_PERMISSION = /^[a-z_]{1,64}$/;
 /** More than this is not "the repository this task is about". */
 export const MAX_TOKEN_REPOSITORIES = 10;
 
-function parseAppTokenRequest(
-  v: Record<string, unknown>,
-): GithubAppTokenRequest | string {
+/** What an App token is limited to: one owner's named repositories, and named permissions. */
+interface TokenScope {
+  app: string;
+  owner: string;
+  repositories: string[];
+  permissions: Record<string, "read" | "write">;
+}
+
+function parseTokenScope(v: Record<string, unknown>): TokenScope | string {
   if (typeof v.app !== "string" || !isSecretName(v.app)) {
     return "app must be a secret name";
   }
@@ -334,13 +369,68 @@ function parseAppTokenRequest(
   if (Object.keys(permissions).length === 0) {
     return "permissions must not be empty";
   }
-  return {
-    type: "github-app-token",
-    app: v.app,
-    owner: v.owner,
-    repositories,
-    permissions,
-  };
+  return { app: v.app, owner: v.owner, repositories, permissions };
+}
+
+function parseAppTokenRequest(
+  v: Record<string, unknown>,
+): GithubAppTokenRequest | string {
+  const scope = parseTokenScope(v);
+  if (typeof scope === "string") return scope;
+  return { type: "github-app-token", ...scope };
+}
+
+/** Where a {@link GithubApiRequest} goes. Its `path` is only ever appended to this. */
+export const GITHUB_API = "https://api.github.com";
+
+const MAX_GITHUB_PATH = 2048;
+
+function parseGithubApiRequest(
+  v: Record<string, unknown>,
+): GithubApiRequest | string {
+  const scope = parseTokenScope(v);
+  if (typeof scope === "string") return scope;
+
+  const { path } = v;
+  if (
+    typeof path !== "string" || !path.startsWith("/") ||
+    path.startsWith("//") || path.length > MAX_GITHUB_PATH ||
+    /[\\\s#]/.test(path)
+  ) {
+    return 'path must be an api.github.com path like "/repos/OWNER/REPO/issues"';
+  }
+  const url = new URL(path, GITHUB_API);
+  const segments = url.pathname.split("/");
+  if (
+    url.origin !== GITHUB_API ||
+    path.split("?")[0].split("/").some((s) => s === "." || s === "..")
+  ) {
+    return "path must stay on api.github.com";
+  }
+  // A path into one repository must be one the token is limited to, so what the approver reads
+  // as "owner/repo" is where the call goes. (The token would refuse anything else anyway.)
+  if (segments[1] === "repos" && segments[2] !== undefined) {
+    const owner = decodeURIComponent(segments[2]).toLowerCase();
+    const repo = decodeURIComponent(segments[3] ?? "").toLowerCase();
+    if (
+      owner !== scope.owner.toLowerCase() ||
+      !scope.repositories.some((r) => r.toLowerCase() === repo)
+    ) {
+      return "path must be in one of the listed repositories of owner";
+    }
+  }
+
+  if (v.method !== undefined) {
+    if (
+      typeof v.method !== "string" || !METHODS.includes(v.method.toUpperCase())
+    ) {
+      return `method must be one of ${METHODS.join(", ")}`;
+    }
+  }
+  const req: GithubApiRequest = { type: "github-api", ...scope, path };
+  if (v.method !== undefined) req.method = (v.method as string).toUpperCase();
+  if (v.body !== undefined) req.body = v.body;
+  return req;
 }
 
 export const MAX_DESCRIPTION_LENGTH = 350;
@@ -390,6 +480,9 @@ function parseCreateRepoRequest(
 export function summarize(req: KagiRequest): string {
   if (isCreateRepoRequest(req)) {
     return `GitHub リポジトリ作成 ${req.owner}/${req.name} (${req.visibility})`;
+  }
+  if (isGithubApiRequest(req)) {
+    return `GitHub API ${methodOf(req)} ${req.path.split("?")[0]}`;
   }
   if (isAppTokenRequest(req)) {
     const perms = Object.entries(req.permissions)

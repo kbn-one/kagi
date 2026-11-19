@@ -60,15 +60,18 @@ import {
 } from "../lib/kagi/device.ts";
 import {
   appJwt,
+  callGithubApi,
   createRepository,
   mintInstallationToken,
 } from "../lib/kagi/github_app.ts";
 import {
+  type GithubApiRequest,
   type GithubAppTokenRequest,
   type GithubCreateRepoRequest,
   type HttpRequest,
   isAppTokenRequest,
   isCreateRepoRequest,
+  isGithubApiRequest,
   isHttpRequest,
   isSecretName,
   type KagiRequest,
@@ -471,6 +474,24 @@ export const KagiApp = clientEntry(
           return;
         }
 
+        if (isGithubApiRequest(tx.request)) {
+          const app = vault.entries[tx.request.app] as GithubAppSecret;
+          conn.decide(tx.id, true);
+          try {
+            const result = await callGithubApi(tx.request, app);
+            conn.complete(tx.id, result);
+            setStatus(
+              `GitHub API を呼びました (HTTP ${result.status})。使ったトークンは失効させました。`,
+              "success",
+            );
+          } catch (e) {
+            const message = errorText(e, "GitHub API を呼べませんでした");
+            conn.fail(tx.id, message);
+            throw new Error(message);
+          }
+          return;
+        }
+
         if (isCreateRepoRequest(tx.request)) {
           const app = vault.entries[tx.request.app] as GithubAppSecret;
           conn.decide(tx.id, true);
@@ -783,6 +804,8 @@ export const KagiApp = clientEntry(
                 <dl mix={detailsStyle}>
                   {isAppTokenRequest(tx.request)
                     ? appTokenDetails(tx.request)
+                    : isGithubApiRequest(tx.request)
+                    ? githubApiDetails(tx.request)
                     : isCreateRepoRequest(tx.request)
                     ? createRepoDetails(tx.request)
                     : httpDetails(tx.request)}
@@ -904,9 +927,9 @@ export const KagiApp = clientEntry(
       <section mix={cardStyle}>
         <h2>GitHub App を追加</h2>
         <p mix={mutedStyle}>
-          App の秘密鍵はこの端末から出ません。リクエスト元には、指定された
-          リポジトリと権限だけに絞った 1 時間有効のトークンを、承認のたびに
-          発行して渡します。
+          App の秘密鍵はこの端末から出ません。承認のたびに、指定された
+          リポジトリと権限だけに絞ったトークンを発行し、リクエスト元に渡す （1
+          時間有効）か、この端末で GitHub API を呼んですぐ失効させます。
         </p>
         <div mix={formStyle}>
           <input
@@ -1222,6 +1245,9 @@ function safeHost(req: HttpRequest): string {
 /** What a request is, and what it is about: the line the approver reads first. */
 function headingOf(req: KagiRequest): [string, string] {
   if (isAppTokenRequest(req)) return ["GitHub トークン発行", req.owner];
+  if (isGithubApiRequest(req)) {
+    return [`GitHub API ${methodOf(req)}`, req.path];
+  }
   if (isCreateRepoRequest(req)) {
     return ["GitHub リポジトリ作成", `${req.owner}/${req.name}`];
   }
@@ -1263,8 +1289,8 @@ function describeSecret(entry: SecretEntry): string {
     : " → 送信先の制限なし";
 }
 
-/** What a token request grants, spelled out: this is the whole of what the approver decides. */
-function appTokenDetails(req: GithubAppTokenRequest) {
+/** The repositories and permissions a token is limited to. */
+function scopeDetails(req: GithubAppTokenRequest | GithubApiRequest) {
   return (
     <>
       <dt>リポジトリ</dt>
@@ -1283,12 +1309,40 @@ function appTokenDetails(req: GithubAppTokenRequest) {
           </div>
         ))}
       </dd>
-      <dt>有効期限</dt>
-      <dd>1 時間</dd>
       <dt>使う App</dt>
       <dd>
         <code>[{req.app}]</code>
       </dd>
+    </>
+  );
+}
+
+/** What a token request grants, spelled out: this is the whole of what the approver decides. */
+function appTokenDetails(req: GithubAppTokenRequest) {
+  return (
+    <>
+      {scopeDetails(req)}
+      <dt>有効期限</dt>
+      <dd>1 時間（リクエスト元に渡す）</dd>
+    </>
+  );
+}
+
+/** A GitHub API call (the heading names it): its body, and what its token may do. */
+function githubApiDetails(req: GithubApiRequest) {
+  return (
+    <>
+      {req.body !== undefined && (
+        <>
+          <dt>ボディ</dt>
+          <dd>
+            <pre mix={codeStyle}>{JSON.stringify(req.body, null, 2)}</pre>
+          </dd>
+        </>
+      )}
+      {scopeDetails(req)}
+      <dt>トークン</dt>
+      <dd>この端末で使い、すぐ失効（リクエスト元には渡さない）</dd>
     </>
   );
 }

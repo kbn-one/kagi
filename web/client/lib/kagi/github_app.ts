@@ -1,5 +1,7 @@
 /**
- * Minting a GitHub App installation token on the approver's phone.
+ * Minting a GitHub App installation token on the approver's phone — to hand to the requester
+ * ({@link mintInstallationToken}), or to use here and revoke ({@link callGithubApi},
+ * {@link createRepository}).
  *
  * The App's private key stays in the vault. To answer a {@link GithubAppTokenRequest} the phone:
  *
@@ -12,14 +14,17 @@
  * code into a repository nobody approved.
  */
 
-import type {
-  GithubAppTokenRequest,
-  GithubCreateRepoRequest,
-  KagiResult,
+import {
+  GITHUB_API,
+  type GithubApiRequest,
+  type GithubAppTokenRequest,
+  type GithubCreateRepoRequest,
+  type KagiResult,
+  methodOf,
 } from "./protocol.ts";
-import type { GithubAppSecret } from "./substitute.ts";
+import { type GithubAppSecret, scrub } from "./substitute.ts";
 
-const API = "https://api.github.com";
+const API = GITHUB_API;
 
 const b64url = (bytes: Uint8Array): string =>
   bytes.toBase64({ alphabet: "base64url", omitPadding: true });
@@ -121,33 +126,39 @@ async function githubError(res: Response, what: string): Promise<Error> {
   );
 }
 
+/** What a token is limited to: the part of a token or API request minting reads. */
+type TokenScope = Pick<
+  GithubAppTokenRequest,
+  "owner" | "repositories" | "permissions"
+>;
+
 /**
- * Mints the token the request asks for. Throws when GitHub refuses, or when its answer is not
- * limited to the requested repositories — in which case the token is dropped, not returned.
+ * Mints a token limited to `scope`. Throws when GitHub refuses, or when its answer is not limited
+ * to the requested repositories — in which case the token is dropped, not returned.
  */
-export async function mintInstallationToken(
-  req: GithubAppTokenRequest,
+async function mint(
+  scope: TokenScope,
   app: GithubAppSecret,
-  fetchImpl: typeof fetch = fetch,
-): Promise<KagiResult> {
+  fetchImpl: typeof fetch,
+): Promise<{ status: number; body: string; token: string }> {
   const jwt = await appJwt(app);
   const headers = {
     authorization: `Bearer ${jwt}`,
     accept: "application/vnd.github+json",
   };
 
-  const owner = encodeURIComponent(req.owner);
+  const owner = encodeURIComponent(scope.owner);
   const installation = await fetchImpl(
     `${API}/repos/${owner}/${
-      encodeURIComponent(req.repositories[0])
+      encodeURIComponent(scope.repositories[0])
     }/installation`,
     { headers },
   );
   if (!installation.ok) {
     throw await githubError(
       installation,
-      `GitHub App が ${req.owner}/${
-        req.repositories[0]
+      `GitHub App が ${scope.owner}/${
+        scope.repositories[0]
       } にインストールされていません`,
     );
   }
@@ -157,8 +168,8 @@ export async function mintInstallationToken(
     method: "POST",
     headers: { ...headers, "content-type": "application/json" },
     body: JSON.stringify({
-      repositories: req.repositories,
-      permissions: req.permissions,
+      repositories: scope.repositories,
+      permissions: scope.permissions,
     }),
     redirect: "error",
   });
@@ -166,21 +177,89 @@ export async function mintInstallationToken(
   const body = await res.text();
 
   const granted = JSON.parse(body) as {
+    token: string;
     repositories?: { name: string; full_name?: string }[];
   };
   const names = (granted.repositories ?? []).map((r) => r.name);
-  const wanted = new Set(req.repositories);
+  const wanted = new Set(scope.repositories);
   if (names.length === 0 || names.some((n) => !wanted.has(n))) {
     throw new Error(
       "GitHub が指定外のリポジトリを含むトークンを返したため破棄しました。",
     );
   }
+  return { status: res.status, body, token: granted.token };
+}
 
+/** Revokes an installation token, so it is not left valid for the rest of its hour. */
+async function revoke(token: string, fetchImpl: typeof fetch): Promise<void> {
+  await fetchImpl(`${API}/installation/token`, {
+    method: "DELETE",
+    headers: {
+      authorization: `Bearer ${token}`,
+      accept: "application/vnd.github+json",
+    },
+  }).then((r) => r.body?.cancel(), () => {});
+}
+
+/**
+ * Mints the token the request asks for and hands GitHub's answer — the token with it — to the
+ * requester.
+ */
+export async function mintInstallationToken(
+  req: GithubAppTokenRequest,
+  app: GithubAppSecret,
+  fetchImpl: typeof fetch = fetch,
+): Promise<KagiResult> {
+  const { status, body } = await mint(req, app, fetchImpl);
   return {
-    status: res.status,
+    status,
     headers: { "content-type": "application/json" },
     body,
   };
+}
+
+/**
+ * Makes one GitHub API call as the App: mints a token limited like a token request, calls
+ * `api.github.com` + `path` with it, and revokes it. The requester gets the API's answer with the
+ * token scrubbed out of it (as `[app]`), never the token.
+ */
+export async function callGithubApi(
+  req: GithubApiRequest,
+  app: GithubAppSecret,
+  fetchImpl: typeof fetch = fetch,
+): Promise<KagiResult> {
+  const { token } = await mint(req, app, fetchImpl);
+  try {
+    const headers = new Headers({
+      authorization: `Bearer ${token}`,
+      accept: "application/vnd.github+json",
+      "x-github-api-version": "2022-11-28",
+    });
+    let body: string | undefined;
+    if (req.body !== undefined) {
+      body = JSON.stringify(req.body);
+      headers.set("content-type", "application/json");
+    }
+    const res = await fetchImpl(`${API}${req.path}`, {
+      method: methodOf(req),
+      headers,
+      body,
+      // A redirect would carry the token to wherever GitHub pointed.
+      redirect: "error",
+    });
+    const secrets = { [req.app]: token };
+    const out: Record<string, string> = {};
+    res.headers.forEach((v, k) => {
+      out[k] = scrub(v, secrets);
+    });
+    return {
+      status: res.status,
+      headers: out,
+      body: scrub(await res.text(), secrets),
+    };
+  } finally {
+    await revoke(token, fetchImpl);
+  }
 }
 
 /** The App's installation on an account, and whether that account is an organization. */
@@ -303,9 +382,6 @@ export async function createRepository(
     };
   } finally {
     // The token did its one job; do not leave it valid for the rest of its hour.
-    await fetchImpl(`${API}/installation/token`, {
-      method: "DELETE",
-      headers,
-    }).then((r) => r.body?.cancel(), () => {});
+    await revoke(token, fetchImpl);
   }
 }

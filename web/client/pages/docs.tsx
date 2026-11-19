@@ -265,6 +265,35 @@ git config --global credential.https://github.com.helper \\
           <code>body</code> は GitHub の応答（
           <code>token</code>、<code>expires_at</code> など）。
         </p>
+        <h3 id="github-api">GitHub API を App として呼ぶ</h3>
+        <p>
+          issue やコメントを作るなど、GitHub API を 1 回呼ぶだけなら、
+          トークンを受け取らずにスマホに呼ばせる。スマホは同じように絞ったトークンを
+          発行して <code>https://api.github.com</code>{" "}
+          に呼び出し、すぐ失効させる。
+          トークンはスマホの外に出ず、エージェントには API の応答だけが返る
+          （トークンを受け取ってから自分で呼ぶ往復が要らない）。
+        </p>
+        <pre mix={preStyle}>{`curl -X POST ${SUB}/req \
+  -H 'content-type: application/json' \
+  -d '{
+    "type": "github-api",
+    "app": "GH_APP",
+    "owner": "kbn-one",
+    "repositories": ["kagi"],
+    "permissions": { "issues": "write" },
+    "method": "POST",
+    "path": "/repos/kbn-one/kagi/issues",
+    "body": { "title": "…", "body": "…" }
+  }'`}</pre>
+        <p>
+          <code>path</code> は <code>api.github.com</code>{" "}
+          のパス（クエリ込み）。
+          <code>/repos/OWNER/REPO/…</code> なら、その OWNER/REPO は{" "}
+          <code>owner</code> と <code>repositories</code>{" "}
+          に入っている必要がある。結果の <code>body</code>{" "}
+          は GitHub の応答そのもの。
+        </p>
       </section>
 
       <section mix={cardStyle} id="create">

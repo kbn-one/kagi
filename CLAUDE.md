@@ -86,13 +86,13 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
 
 ## プッシュ通知
 
-Web Push は `jsr:@remix-kbn/web-push`（id.kbn.one と共通）で、このサーバーが
-自分の VAPID 鍵で送る。id.kbn.one には依存しない。
+Web Push は `jsr:@remix-kbn/web-push` で、このサーバーが自分の VAPID 鍵で送る。
 
 - 購読は subscription の登録に付けて Room（Durable Object）に置く
   （`Registration.push`）。スマホが認証済みの WebSocket で
-  `{ type: "push", subscription }` を送って入れ替える（null で止める）。 `ready`
-  メッセージが VAPID 公開鍵と、購読が保存済みかを返す。
+  `{ type: "push", subscription }` を送って入れ替える（止めるのは下の
+  `unregister` だけ）。 `ready` メッセージが VAPID
+  公開鍵と、購読が保存済みかを返す。
 - スマホ側（`lib/kagi/connection.ts`）は通知が許可済みなら接続のたびに
   `subscribePush` して送り直す（鍵が変わっていれば作り直される）。なので購読の
   失効や鍵のローテートは、スマホが `/kagi` を開けば自動で直る。未許可なら

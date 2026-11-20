@@ -386,18 +386,6 @@ Deno.test("the push subscription is replaced, validated, and survives a reconnec
   assertEquals(notified, [`https://push.example/2 ${txId}`]);
 });
 
-Deno.test("null turns the push off", async () => {
-  const { hub, connect, notified } = await setup();
-  const phone = await connect();
-  await phone.next();
-  phone.emit({ type: "push", subscription: subscription() });
-  await phone.next();
-  phone.emit({ type: "push", subscription: null });
-  assertEquals(await phone.next(), { type: "push", registered: false });
-  await submit(hub, ghRequest);
-  assertEquals(notified, []);
-});
-
 Deno.test("a subscription the push service says is gone is forgotten, and the phone is told", async () => {
   const { hub, connect, notified, pushService } = await setup();
   const phone = await connect();

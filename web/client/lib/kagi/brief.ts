@@ -13,7 +13,7 @@ export interface BriefOptions {
   /** The subscription URL, `https://…/api/sub/<id>`. */
   base: string;
   /** The vault's names (`vaultNames()`), with their kinds and hosts. */
-  secrets?: Record<string, SecretSummary> | null;
+  secrets?: Record<string, SecretSummary>;
 }
 
 export function agentBrief({ base, secrets }: BriefOptions): string {

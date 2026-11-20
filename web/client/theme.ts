@@ -24,29 +24,6 @@ import { color, radius } from "./tokens.ts";
 
 // --- shared mixins -----------------------------------------------------------
 
-/** A date, a byline, a caption: small, quiet, on a line of its own. */
-export const metaStyle = css({
-  display: "block",
-  color: color.muted,
-  fontSize: "0.85rem",
-  marginBlock: "0.2rem",
-});
-
-/** A filled call to action. It goes on an `<a href>`, not on a `<button>`. */
-export const buttonStyle = css({
-  display: "inline-block",
-  marginTop: "0.5rem",
-  padding: "0.6rem 1rem",
-  borderRadius: radius.md,
-  background: color.accent,
-  color: color.onAccent,
-  textDecoration: "none",
-  fontWeight: 600,
-  transition: "filter 120ms ease",
-  "&:hover": { filter: "brightness(1.08)" },
-  "&:active": { transform: "translateY(1px)" },
-});
-
 /** A bordered, slightly raised block: the home page demo, a callout, a pull-out. */
 export const cardStyle = css({
   marginBlock: "2rem",

@@ -37,11 +37,8 @@ interface StoredVault {
   salt: string;
   iv: string;
   ciphertext: string;
-  /**
-   * Each secret's name and summary, in the clear. Absent in a vault sealed before names were kept;
-   * the next unlock writes it.
-   */
-  names?: Record<string, SecretSummary>;
+  /** Each secret's name and summary, in the clear. Written with every seal. */
+  names: Record<string, SecretSummary>;
   /**
    * Secrets deleted while the vault was closed. Still in the ciphertext until the next unlock, which
    * leaves them out and re-seals; never handed out before that.
@@ -77,12 +74,9 @@ function readStored(): StoredVault | null {
 
 export const hasVault = (): boolean => readStored() !== null;
 
-/**
- * The secrets' names and summaries, readable without the passkey. `null` with no vault, or with
- * one sealed before names were kept (until it is next opened).
- */
-export const vaultNames = (): Record<string, SecretSummary> | null =>
-  readStored()?.names ?? null;
+/** The secrets' names and summaries, readable without the passkey. Empty with no vault. */
+export const vaultNames = (): Record<string, SecretSummary> =>
+  readStored()?.names ?? {};
 
 /** Whether this browser can do WebAuthn at all (PRF itself is only known after trying). */
 export const passkeysAvailable = (): boolean =>
@@ -186,14 +180,6 @@ const unlockWith = async (
     // `removed` and rewrites the list).
     for (const name of stored.removed) delete entries[name];
     await save(entries);
-  } else if (
-    JSON.stringify(stored.names) !== JSON.stringify(summarize(entries))
-  ) {
-    // A vault from before names were kept, or one whose list drifted: put the list right.
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ ...stored, names: summarize(entries) }),
-    );
   }
   return { entries, save };
 };
@@ -252,7 +238,7 @@ export async function unlockVault(): Promise<UnlockedVault> {
 export function forgetSecret(name: string): void {
   const stored = readStored();
   if (!stored) return;
-  const { [name]: _gone, ...names } = stored.names ?? {};
+  const { [name]: _gone, ...names } = stored.names;
   const removed = [...new Set([...(stored.removed ?? []), name])];
   localStorage.setItem(
     STORAGE_KEY,

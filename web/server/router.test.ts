@@ -40,6 +40,8 @@ Deno.test("GET /sw.js serves the worker with a root scope", async () => {
 
 Deno.test("HTML responses carry a nonce-based CSP, and every executable tag has the nonce", async () => {
   for (const path of ["/", "/kagi", "/docs"]) {
+    // `/docs` places no island, so it has no script to carry the nonce.
+    const scripted = path !== "/docs";
     const res = await router.fetch(new Request(`http://x${path}`));
     const policy = res.headers.get("content-security-policy") ?? "";
     const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
@@ -54,7 +56,7 @@ Deno.test("HTML responses carry a nonce-based CSP, and every executable tag has 
       .map((m) => m[0])
       // A JSON data block is not executed, so CSP does not apply to it.
       .filter((tag) => !tag.includes('type="application/json"'));
-    assert(executable.length > 0, `${path}: no script tags`);
+    assertEquals(executable.length > 0, scripted, `${path}: script tags`);
     for (const tag of executable) {
       assertStringIncludes(tag, `nonce="${nonce}"`, `${path}: ${tag}`);
     }

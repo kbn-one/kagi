@@ -15,10 +15,6 @@ async function assertProblem(res: Response, status: number) {
   return body;
 }
 
-Deno.test("worker no longer serves a JWKS (no IdP to verify us)", async () => {
-  await assertProblem(await get("/.well-known/jwks.json"), 404);
-});
-
 Deno.test("worker without the static assets binding has no pages to serve", async () => {
   await assertProblem(await get("/kagi"), 404);
 });

@@ -163,7 +163,7 @@ export const KagiApp = clientEntry(
     /** Held only while the secrets card is open for editing. */
     let unlocked: UnlockedVault | null = null;
     /** The secrets' names, in the clear beside the vault: shown even while it is closed. */
-    let names: Record<string, SecretSummary> | null = null;
+    let names: Record<string, SecretSummary> = {};
 
     let sub: Subscription | null = null;
     /** Launched from the home screen. */
@@ -418,7 +418,7 @@ export const KagiApp = clientEntry(
       deleteVault();
       vaultExists = false;
       unlocked = null;
-      names = null;
+      names = {};
       handle.update();
     };
 
@@ -1169,16 +1169,13 @@ export const KagiApp = clientEntry(
 
     /** The secrets by name, from the clear-text list; deletable open or closed. */
     const secretList = () => {
-      const list = Object.entries(names ?? {});
+      const list = Object.entries(names);
       return (
         <ul mix={listStyle}>
-          {names === null && (
+          {list.length === 0 && (
             <li mix={mutedStyle}>
-              名前は一度パスキーで開くと、閉じていても表示されます。
+              まだ秘密がありません。
             </li>
-          )}
-          {names !== null && list.length === 0 && (
-            <li mix={mutedStyle}>まだ秘密がありません。</li>
           )}
           {list.map(([name, entry]) => (
             <li mix={[itemStyle, secretRowStyle]} key={name}>
@@ -1393,14 +1390,7 @@ export const KagiApp = clientEntry(
           </button>
         </div>
         <p mix={mutedStyle}>
-          {names === null
-            ? (
-              <>
-                秘密の名前を入れるには、一度<a href="#vault">金庫</a>
-                をパスキーで開いてください（以後は開かなくても入ります）。
-              </>
-            )
-            : "金庫の秘密の名前も含めています（値は含みません）。"}
+          金庫の秘密の名前も含めています（値は含みません）。
         </p>
         <details mix={foldStyle}>
           <summary>内容を見る</summary>

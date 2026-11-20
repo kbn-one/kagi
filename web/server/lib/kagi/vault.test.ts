@@ -58,15 +58,3 @@ Deno.test("a secret deleted while closed is gone at once, and out of the ciphert
   );
   localStorage.clear();
 });
-
-Deno.test("an old vault without names gets its list on the next unlock", async () => {
-  localStorage.clear();
-  await vaultForTests.seal(prf, { A: { value: "a", hosts: ["x.example"] } });
-  const stored = JSON.parse(localStorage.getItem("kagi.vault")!);
-  delete stored.names;
-  localStorage.setItem("kagi.vault", JSON.stringify(stored));
-  assertEquals(vaultNames(), null);
-  await vaultForTests.unlock(prf);
-  assertEquals(vaultNames(), { A: { hosts: ["x.example"] } });
-  localStorage.clear();
-});

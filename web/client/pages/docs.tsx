@@ -8,8 +8,8 @@ export const title = "使い方 — kagi";
 export const description =
   "承認者のスマホの準備、リクエストの送り方、GitHub App で git push を 1 リポジトリに絞る方法。";
 
-/** The shell places the sign-in island, so every page boots the runtime. */
-export const hydrate = true;
+/** No island: the page ships no JavaScript. */
+export const hydrate = false;
 
 const ORIGIN = "https://kagi.kbn.one";
 const SUB = `${ORIGIN}/api/sub/<id>`;

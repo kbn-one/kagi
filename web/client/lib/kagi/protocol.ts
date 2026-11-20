@@ -194,10 +194,10 @@ export type ClientMessage =
   /** Answer to a `get` (or a failure, any time). */
   | { type: "result"; txId: string; result?: KagiResult; error?: string }
   /**
-   * Where to push this approver (`PushSubscription.toJSON()`), replacing what was stored; null
-   * stops the pushes.
+   * Where to push this approver (`PushSubscription.toJSON()`), replacing what was stored. Pushes
+   * stop only with the subscription itself (`unregister`).
    */
-  | { type: "push"; subscription: PushSubscriptionJson | null }
+  | { type: "push"; subscription: PushSubscriptionJson }
   /**
    * Retires this subscription for good: the server forgets the registration, its push target and
    * its transactions, and refuses the id from then on (410), so a leaked URL cannot be taken over.

@@ -22,7 +22,7 @@ export const routes = route("", {
   /** How to set up the phone, send requests, and limit git push with a GitHub App. */
   docs: get("/docs"),
   api: route("api", {
-    /** One approver subscription. `server/lib/kagi/` answers all four. */
+    /** One approver subscription. `server/lib/kagi/` answers all of them. */
     sub: route("sub", {
       /** The approver registers its device key under a fresh random id. */
       register: put("/:id"),
@@ -32,6 +32,11 @@ export const routes = route("", {
       res: get("/:id/res"),
       /** The approver's WebSocket. */
       ws: get("/:id/ws"),
+      /**
+       * The approver has the server make an approved call, for an API without CORS
+       * (`server/lib/kagi/relay.ts`). Signed with the device key; once per transaction.
+       */
+      relay: post("/:id/relay"),
     }),
   }),
 });

@@ -41,6 +41,7 @@ import * as Docs from "../client/pages/docs.tsx";
 import * as Kagi from "../client/pages/kagi.tsx";
 
 import { subController } from "./controllers/api/sub.ts";
+import { moduleRunner, setRelayRunner } from "./lib/kagi/relay.ts";
 import { kagiHub } from "./lib/kagi/hub.ts";
 import { parseSubPath } from "./lib/kagi/room.ts";
 import { copDenied } from "./lib/problem.ts";
@@ -122,6 +123,9 @@ const top = createController(routes, {
 
 router.map(routes, top);
 router.map(routes.api.sub, subController);
+
+// Relayed calls (`lib/kagi/relay.ts`) run in this process here; the Worker gives each its own isolate.
+setRelayRunner(moduleRunner());
 
 router.get("/static/*path", ({ request }) => staticFiles.fetch(request));
 router.get(`${assetsPath}/*path`, ({ request }) => assets.fetch(request));

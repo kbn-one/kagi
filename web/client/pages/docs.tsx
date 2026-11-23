@@ -90,7 +90,9 @@ export default function Docs(_handle: Handle) {
           <dt>403</dt>
           <dd>承認者が拒否した</dd>
           <dt>502</dt>
-          <dd>承認者のスマホからの呼び出しが失敗した（CORS など）</dd>
+          <dd>
+            承認者のスマホからの呼び出しが失敗した（CORS など）
+          </dd>
           <dt>410</dt>
           <dd>期限切れ（10 分）か、受け渡し済み</dd>
         </dl>
@@ -131,6 +133,13 @@ export default function Docs(_handle: Handle) {
           API はスマホのブラウザーから呼ばれるので、呼び先が CORS
           を許可している必要がある（<code>api.github.com</code>{" "}
           は許可している）。redirect は失敗として扱う。
+        </p>
+        <p>
+          CORS を許可していない API には、承認者が秘密を「kagi
+          のサーバー経由で送る」にして登録する。その秘密を使う呼び出しは、
+          承認された 1 回だけ、承認したホストにだけ、サーバーが使い捨ての Worker
+          で代わりに行う（そのあいだはサーバーが値を扱う）。 redirect
+          は追わず、3xx をそのまま返す。リクエスト元から見た使い方は変わらない。
         </p>
       </section>
 

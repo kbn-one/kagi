@@ -39,7 +39,7 @@ export function agentBrief({ base, secrets }: BriefOptions): string {
     "",
     '1. POST <endpoint>/req, JSON body → 202 {"transaction_id":"…"}',
     '   HTTP call: {"secrets":["NAME"],"url":"https://…","method":"GET","headers":{"authorization":"Bearer [NAME]"},"body":…}',
-    '     [NAME] in url/headers/body is filled in on the phone. List every name used in "secrets". The target API must allow CORS.',
+    '     [NAME] in url/headers/body is filled in on the phone. List every name used in "secrets". The target API must allow CORS, unless the human set the secret to go through the kagi server.',
     `   GitHub token (named repos, given permissions, 1 hour): {"type":"github-app-token","app":"${app}","owner":"OWNER","repositories":["REPO"],"permissions":{"contents":"write"}}`,
     `   GitHub API call as the App (token stays on the phone; you get the API's answer): {"type":"github-api","app":"${app}","owner":"OWNER","repositories":["REPO"],"permissions":{"issues":"write"},"method":"POST","path":"/repos/OWNER/REPO/issues","body":{"title":"…"}}`,
     `   Create a GitHub repo: {"type":"github-create-repo","app":"${app}","owner":"OWNER","name":"REPO","visibility":"private"}`,

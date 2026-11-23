@@ -11,6 +11,7 @@ import {
   type KagiResult,
   methodOf,
   PLACEHOLDER,
+  type RelayCall,
 } from "./protocol.ts";
 
 export type Secrets = Record<string, string>;
@@ -23,6 +24,12 @@ export interface TextSecret {
   kind?: "text";
   value: string;
   hosts: string[];
+  /**
+   * Calls with this secret go through the server (`server/lib/kagi/relay.ts`) instead of straight
+   * from this browser: for APIs that do not allow this origin by CORS. The server then has the
+   * value in the clear for the one call, so it is the approver's choice, secret by secret.
+   */
+  relay?: boolean;
 }
 
 /**
@@ -48,13 +55,27 @@ export interface SecretSummary {
   kind?: "text" | "github-app";
   hosts: string[];
   appId?: string;
+  relay?: boolean;
 }
 
 /** An entry without its value. */
 export function summarizeSecret(entry: SecretEntry): SecretSummary {
   return isAppSecret(entry)
     ? { kind: "github-app", hosts: [], appId: entry.appId }
-    : { hosts: [...entry.hosts] };
+    : { hosts: [...entry.hosts], ...(entry.relay ? { relay: true } : {}) };
+}
+
+/** Whether a request's call goes through the server: when any secret it uses says so. */
+export function usesRelay(
+  req: KagiRequest,
+  entries: Record<string, SecretSummary | SecretEntry>,
+): boolean {
+  return isHttpRequest(req) &&
+    req.secrets.some((name) => {
+      const entry = entries[name];
+      return !!entry && entry.kind !== "github-app" &&
+        (entry as { relay?: boolean }).relay === true;
+    });
 }
 
 const fill = (s: string, secrets: Secrets): string =>
@@ -100,6 +121,15 @@ export function secretsProblem(
     }
     if (entry.hosts.length && !entry.hosts.includes(host)) {
       return `秘密 ${name} は ${host} への送信が許可されていません`;
+    }
+  }
+  // A relayed call carries every secret in it through the server, so each must allow that.
+  if (usesRelay(req, vault)) {
+    const direct = req.secrets.find((name) =>
+      !(vault[name] as TextSecret).relay
+    );
+    if (direct) {
+      return `秘密 ${direct} は kagi のサーバー経由での送信を許していないので、サーバー経由の秘密と一緒には使えません`;
     }
   }
   return null;
@@ -158,5 +188,45 @@ export async function execute(
     status: res.status,
     headers,
     body: scrub(await res.text(), secrets),
+  };
+}
+
+/**
+ * Has the server make the call (`postRelay` in `device.ts`) and returns its answer scrubbed, as
+ * {@link execute} does for a call made here.
+ */
+export async function executeRelayed(
+  req: HttpRequest,
+  secrets: Secrets,
+  post: (call: RelayCall) => Promise<Response>,
+): Promise<KagiResult> {
+  const { url, init } = buildFetch(req, secrets);
+  const headers: Record<string, string> = {};
+  (init.headers as Headers).forEach((v, k) => {
+    headers[k] = v;
+  });
+  const res = await post({
+    url,
+    method: init.method ?? "GET",
+    headers,
+    ...(typeof init.body === "string" ? { body: init.body } : {}),
+  });
+  const answer = await res.json().catch(() => null) as
+    | (KagiResult & { detail?: unknown })
+    | null;
+  if (!res.ok || !answer || typeof answer.status !== "number") {
+    const detail = typeof answer?.detail === "string"
+      ? answer.detail
+      : `HTTP ${res.status}`;
+    throw new Error(`中継できませんでした: ${scrub(detail, secrets)}`);
+  }
+  const scrubbed: Record<string, string> = {};
+  for (const [k, v] of Object.entries(answer.headers ?? {})) {
+    scrubbed[k] = scrub(String(v), secrets);
+  }
+  return {
+    status: answer.status,
+    headers: scrubbed,
+    body: scrub(String(answer.body ?? ""), secrets),
   };
 }

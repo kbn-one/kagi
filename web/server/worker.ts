@@ -20,6 +20,11 @@ import {
   type DurableObjectNamespaceLike,
   useDurableObjects,
 } from "./lib/kagi/hub.ts";
+import {
+  loaderRunner,
+  setRelayRunner,
+  type WorkerLoaderLike,
+} from "./lib/kagi/relay.ts";
 import { copDenied, problem } from "./lib/problem.ts";
 import { type AssetsLike, createPagesRouter } from "./pages.ts";
 
@@ -41,9 +46,12 @@ router.map(routes.api.sub, subController as never);
 interface WorkerEnv {
   KAGI_ROOM?: DurableObjectNamespaceLike;
   ASSETS?: AssetsLike;
+  /** The Worker Loader, which makes the single-use Dynamic Worker of each relayed call. */
+  LOADER?: WorkerLoaderLike;
 }
 
 let boundDurableObjects = false;
+let boundLoader: WorkerLoaderLike | undefined;
 let pages: ReturnType<typeof createPagesRouter> | undefined;
 let pagesAssets: AssetsLike | undefined;
 
@@ -53,6 +61,11 @@ export default {
     if (!boundDurableObjects && env?.KAGI_ROOM) {
       useDurableObjects(env.KAGI_ROOM);
       boundDurableObjects = true;
+    }
+    // Without it (the Deno tests, unless they set one) the relay answers 501.
+    if (env?.LOADER && boundLoader !== env.LOADER) {
+      setRelayRunner(loaderRunner(env.LOADER));
+      boundLoader = env.LOADER;
     }
     if (new URL(request.url).pathname.startsWith("/api/")) {
       return router.fetch(request);

@@ -1,6 +1,12 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import worker from "./worker.ts";
 import { setKagiHub } from "./lib/kagi/hub.ts";
+import {
+  moduleRunner,
+  setRelayRunner,
+  type WorkerLoaderLike,
+} from "./lib/kagi/relay.ts";
+import { relayMessage } from "../client/lib/kagi/protocol.ts";
 
 const get = (path: string) => worker.fetch(new Request(`http://x${path}`));
 
@@ -150,4 +156,102 @@ Deno.test("worker forwards /api/sub to the KagiRoom Durable Object when bound", 
   assertEquals(await res.text(), "from DO");
   assertEquals(seen, [`${id} /api/sub/${id}/res`]);
   setKagiHub(undefined);
+});
+
+Deno.test("worker relays an approved call through a Dynamic Worker from LOADER, once", async () => {
+  const id = "relayrelayrelayrelay01";
+  const keys = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign", "verify"],
+  );
+  const publicKey = await crypto.subtle.exportKey("jwk", keys.publicKey);
+  await worker.fetch(
+    new Request(`http://x/api/sub/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ publicKey }),
+    }),
+  );
+  const submitted = await worker.fetch(
+    new Request(`http://x/api/sub/${id}/req`, {
+      method: "POST",
+      body: JSON.stringify({
+        secrets: ["KEY"],
+        url: "https://no-cors.example/v1",
+        headers: { "x-api-key": "[KEY]" },
+      }),
+    }),
+  );
+  const { transaction_id: txId } = await submitted.json();
+
+  // The upstream API, as the Dynamic Worker reaches it.
+  const upstream: string[] = [];
+  const upstreamFetch = ((url: string | URL, init?: RequestInit) => {
+    upstream.push(`${url} ${new Headers(init?.headers).get("x-api-key")}`);
+    return Promise.resolve(new Response("pong"));
+  }) as typeof fetch;
+  const run = moduleRunner(upstreamFetch);
+  const loads: string[] = [];
+  const LOADER: WorkerLoaderLike = {
+    load: (code) => {
+      loads.push(code.env?.HOST ?? "");
+      return {
+        getEntrypoint: () => ({
+          fetch: (r: Request) => run(r, code.env!.HOST),
+        }),
+      };
+    },
+  };
+
+  const signature = new Uint8Array(
+    await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      keys.privateKey,
+      new TextEncoder().encode(relayMessage(id, txId)),
+    ),
+  ).toBase64({ alphabet: "base64url", omitPadding: true });
+  const relayOnce = () =>
+    worker.fetch(
+      new Request(`http://x/api/sub/${id}/relay`, {
+        method: "POST",
+        headers: {
+          "sec-fetch-site": "same-origin",
+          "kagi-transaction": txId,
+          "kagi-signature": signature,
+        },
+        body: JSON.stringify({
+          url: "https://no-cors.example/v1",
+          method: "GET",
+          headers: { "x-api-key": "s3cret" },
+        }),
+      }),
+      { LOADER },
+    );
+  try {
+    const res = await relayOnce();
+    assertEquals(res.status, 200);
+    assertEquals(await res.json(), {
+      status: 200,
+      headers: { "content-type": "text/plain;charset=UTF-8" },
+      body: "pong",
+    });
+    assertEquals(loads, ["no-cors.example"]);
+    assertEquals(upstream, ["https://no-cors.example/v1 s3cret"]);
+
+    await assertProblem(await relayOnce(), 409);
+    assertEquals(upstream.length, 1);
+  } finally {
+    setRelayRunner(null);
+  }
+});
+
+Deno.test("worker refuses a cross-origin relay before it reaches the room", async () => {
+  const res = await worker.fetch(
+    new Request("http://x/api/sub/relayrelayrelayrelay02/relay", {
+      method: "POST",
+      headers: { origin: "http://evil.example" },
+      body: "{}",
+    }),
+  );
+  await assertProblem(res, 403);
 });

@@ -8,16 +8,20 @@
  * nothing, a Durable Object is a single instance per id.
  *
  * The server never sees a secret. It holds the request text, tells the phone, and relays the
- * phone's (already scrubbed) answer to whoever asks for it — once.
+ * phone's (already scrubbed) answer to whoever asks for it — once. (A call the approver has the
+ * server make, `relay.ts`, is only authorized here: its body never reaches the room.)
  */
 
 import {
   challengeMessage,
   type ClientMessage,
   FINAL_STATUSES,
+  isHttpRequest,
   type KagiResult,
   parseKagiRequest,
   PENDING_TTL_MS,
+  RELAY_HEADERS,
+  relayMessage,
   type ServerMessage,
   type Transaction,
   TX_RETENTION_MS,
@@ -85,14 +89,14 @@ const randomId = (bytes = 16): string =>
 
 export const SUB_ID = /^[A-Za-z0-9_-]{16,64}$/;
 
-export type RoomAction = "register" | "req" | "res" | "ws";
+export type RoomAction = "register" | "req" | "res" | "ws" | "relay";
 
-/** `/…/sub/:id[/req|/res|/ws]` → the id and action, or null. Used where only the URL is known. */
+/** `/…/sub/:id[/req|/res|/ws|/relay]` → the id and action, or null. Used where only the URL is known. */
 export function parseSubPath(
   pathname: string,
   method: string,
 ): { subId: string; action: RoomAction } | null {
-  const m = pathname.match(/\/api\/sub\/([^/]+)(?:\/(req|res|ws))?\/?$/);
+  const m = pathname.match(/\/api\/sub\/([^/]+)(?:\/(req|res|ws|relay))?\/?$/);
   if (!m || !SUB_ID.test(m[1])) return null;
   const action = (m[2] ?? (method === "PUT" ? "register" : null)) as
     | RoomAction
@@ -127,6 +131,8 @@ export class Room {
         return this.#result(request);
       case "ws":
         return this.#connect(request);
+      case "relay":
+        return this.#authorizeRelay(request);
     }
   }
 
@@ -324,6 +330,75 @@ export class Room {
     return true;
   }
 
+  // --- relay ----------------------------------------------------------------
+
+  /**
+   * Whether the approver may have the server make the call of a transaction (`relay.ts`): signed by
+   * the device key, and once per transaction. Answers `{ host }`, the only host the call may go to.
+   *
+   * A `pending` transaction is accepted too: the phone sends its `decision` over the WebSocket and
+   * this right after, so this can arrive first, and the signature is the approver's say-so anyway.
+   * The body (the call itself, with the secrets) never comes here.
+   */
+  async #authorizeRelay(request: Request): Promise<Response> {
+    const registration = await this.#registration();
+    if (!registration) return this.#missing();
+    const txId = request.headers.get(RELAY_HEADERS.transaction);
+    const signature = request.headers.get(RELAY_HEADERS.signature);
+    if (!txId || !signature) {
+      return problem({
+        status: 401,
+        detail:
+          `${RELAY_HEADERS.transaction} and ${RELAY_HEADERS.signature} are required`,
+      });
+    }
+    if (
+      !(await verifyMessage(
+        registration,
+        relayMessage(registration.subId, txId),
+        signature,
+      ))
+    ) {
+      return problem({ status: 401, detail: "Bad signature" });
+    }
+    // In line with the approver's WebSocket messages, so two relays of one transaction cannot race.
+    const run = this.#queue.then(async (): Promise<Response> => {
+      const tx = await this.#load(txId);
+      if (!tx) return problem({ status: 404, detail: "No such transaction" });
+      if (!isHttpRequest(tx.request)) {
+        return problem({
+          status: 409,
+          detail: "Only http requests are relayed",
+        });
+      }
+      if (tx.status !== "pending" && tx.status !== "approved") {
+        return problem({
+          status: 409,
+          detail: `The transaction is ${tx.status}`,
+        });
+      }
+      if (tx.relayed) {
+        return problem({
+          status: 409,
+          detail: "The transaction was already relayed",
+        });
+      }
+      let host: string;
+      try {
+        host = new URL(tx.request.url).host;
+      } catch {
+        return problem({ status: 400, detail: "The request has no valid url" });
+      }
+      tx.relayed = true;
+      await this.#save(tx);
+      return Response.json({ host }, {
+        headers: { "cache-control": "no-store" },
+      });
+    });
+    this.#queue = run.then(() => {}, () => {});
+    return run;
+  }
+
   // --- approver -------------------------------------------------------------
 
   async #connect(request: Request): Promise<Response> {
@@ -360,7 +435,13 @@ export class Room {
             send({ type: "error", detail: "Authenticate first" });
             return socket.close(4401, "unauthenticated");
           }
-          if (!(await verify(registration, nonce, msg.signature))) {
+          if (
+            !(await verifyMessage(
+              registration,
+              challengeMessage(registration.subId, nonce),
+              msg.signature,
+            ))
+          ) {
             send({ type: "error", detail: "Bad signature" });
             return socket.close(4401, "bad signature");
           }
@@ -592,9 +673,10 @@ function isResult(v: unknown): v is KagiResult {
     !!r.headers && typeof r.headers === "object";
 }
 
-async function verify(
+/** Whether the device key signed `message`. */
+async function verifyMessage(
   registration: Registration,
-  nonce: string,
+  message: string,
   signature: string,
 ): Promise<boolean> {
   try {
@@ -609,7 +691,7 @@ async function verify(
       { name: "ECDSA", hash: "SHA-256" },
       key,
       Uint8Array.fromBase64(signature, { alphabet: "base64url" }),
-      new TextEncoder().encode(challengeMessage(registration.subId, nonce)),
+      new TextEncoder().encode(message),
     );
   } catch {
     return false;

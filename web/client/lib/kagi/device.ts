@@ -7,7 +7,12 @@
  * knowing a subscription id is not enough to pose as its approver.
  */
 
-import { challengeMessage } from "./protocol.ts";
+import {
+  challengeMessage,
+  RELAY_HEADERS,
+  type RelayCall,
+  relayMessage,
+} from "./protocol.ts";
 import { routes } from "../../routes.ts";
 
 const SUB_KEY = "kagi.sub";
@@ -89,21 +94,41 @@ export async function forgetSubscription(): Promise<void> {
   await idb("readwrite", (s) => s.delete(DEVICE_KEY));
 }
 
-/** Signs the server's WebSocket challenge with the device key. */
-export async function signChallenge(
-  subId: string,
-  nonce: string,
-): Promise<string> {
+async function sign(message: string): Promise<string> {
   const keys = await loadKeyPair();
   if (!keys) throw new Error("この端末の鍵が見つかりません。");
   const signature = await crypto.subtle.sign(
     { name: "ECDSA", hash: "SHA-256" },
     keys.privateKey,
-    new TextEncoder().encode(challengeMessage(subId, nonce)),
+    new TextEncoder().encode(message),
   );
   return new Uint8Array(signature).toBase64({
     alphabet: "base64url",
     omitPadding: true,
+  });
+}
+
+/** Signs the server's WebSocket challenge with the device key. */
+export const signChallenge = (subId: string, nonce: string): Promise<string> =>
+  sign(challengeMessage(subId, nonce));
+
+/**
+ * Has the server make the call of transaction `txId` (`POST /api/sub/:id/relay`), for an API that
+ * does not allow CORS. Signed with the device key; the server relays each transaction once.
+ */
+export async function postRelay(
+  subId: string,
+  txId: string,
+  call: RelayCall,
+): Promise<Response> {
+  return fetch(routes.api.sub.relay.href({ id: subId }), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      [RELAY_HEADERS.transaction]: txId,
+      [RELAY_HEADERS.signature]: await sign(relayMessage(subId, txId)),
+    },
+    body: JSON.stringify(call),
   });
 }
 

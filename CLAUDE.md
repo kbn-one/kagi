@@ -60,8 +60,19 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
     `tools/git_credential_kagi.ts create owner/name
     --public|--private`。
 - 通知はこのサーバーが自分で送る（下の「プッシュ通知」）。サインインは無い。
+- CORS 非対応の API は中継（`web/server/lib/kagi/relay.ts`）。vault の
+  `relay: true` の秘密を使う `http` リクエストだけ、スマホが埋めた呼び出し
+  （`RelayCall`）を端末鍵で `relayMessage(subId, txId)` に署名して
+  `POST /api/sub/:id/relay` に送る。Room は署名と「1 tx 1 回」だけを見て
+  `{ host }`（tx の URL のホスト）を返し、本文は DO に入らない。Worker は
+  `LOADER`（Worker Loader、`cloudflare.config.ts`）の `load()` で呼び出し毎に
+  使い捨ての Dynamic Worker（`RELAY_MODULE`、バインディング無し・subrequest 1・
+  `env.HOST` 以外は 403・redirect は manual）を作って本文ごと渡す。Deno では
+  同じモジュールを `data:` import（`moduleRunner`、`router.tsx`）。
+  サーバーが秘密を扱う唯一の例外なので、秘密ごとの承認者の選択にしてある。
 - 既知の制約: `:id` を知る人は誰でもリクエストを送れる（承認者が拒否できる
-  だけ）。呼び先 API は CORS でこのオリジンを許可している必要がある。
+  だけ）。中継しない秘密の呼び先 API は CORS でこのオリジンを許可している
+  必要がある。
 
 ## 構造
 

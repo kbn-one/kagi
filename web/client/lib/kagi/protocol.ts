@@ -7,7 +7,9 @@
  * - **Requester** — a script or agent that wants an API call made with a secret it must not see.
  *   `POST /api/sub/:id/req` with a {@link KagiRequest}, then `GET /api/sub/:id/res?transaction_id=`.
  * - **Server** — never sees a secret. It holds the request until the approver decides, pushes a
- *   notification to the approver's phone, and relays the result back to the requester.
+ *   notification to the approver's phone, and relays the result back to the requester. The one
+ *   exception is a call the approver sends through it ({@link RelayCall}), for an API that does not
+ *   allow CORS: only with secrets the approver marked for it, and made in a throwaway isolate.
  * - **Approver** — the phone. Its browser keeps the secrets (encrypted with a passkey), shows the
  *   request, and on approval fills the `[NAME]` placeholders and makes the call itself. It keeps a
  *   WebSocket open to the server ({@link ServerMessage} / {@link ClientMessage}).
@@ -158,6 +160,8 @@ export interface Transaction {
   createdAt: number;
   /** Why it failed, for `failed`. */
   error?: string;
+  /** The approver made this call through the server's relay ({@link RELAY_HEADERS}); once only. */
+  relayed?: true;
 }
 
 /** Server → approver. */
@@ -214,6 +218,34 @@ export interface PushSubscriptionJson {
 /** What the approver's device key signs to authenticate a WebSocket. */
 export const challengeMessage = (subId: string, nonce: string): string =>
   `kagi-ws:${subId}:${nonce}`;
+
+/**
+ * What the approver's device key signs to have the server relay the call of `txId`
+ * (`POST /api/sub/:id/relay`). It is good for one call, to the host of that transaction's URL.
+ */
+export const relayMessage = (subId: string, txId: string): string =>
+  `kagi-relay:${subId}:${txId}`;
+
+/** The headers of `POST /api/sub/:id/relay` that say which transaction, and prove who asks. */
+export const RELAY_HEADERS = {
+  transaction: "kagi-transaction",
+  signature: "kagi-signature",
+} as const;
+
+/**
+ * The body of `POST /api/sub/:id/relay`: the call with its placeholders already filled.
+ *
+ * For APIs that do not allow this origin by CORS, the phone hands the call to the server, which
+ * makes it in a single-use Dynamic Worker (`server/lib/kagi/relay.ts`) and answers with a
+ * {@link KagiResult} (not yet scrubbed: the phone scrubs it). The secrets are in here in the clear,
+ * so only secrets the approver marked `relay` are ever sent this way.
+ */
+export interface RelayCall {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body?: string;
+}
 
 /** `[NAME]` placeholders. Names are letters, digits and `_`. */
 export const PLACEHOLDER = /\[([A-Za-z_][A-Za-z0-9_]*)\]/g;

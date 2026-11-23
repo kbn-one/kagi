@@ -1,10 +1,14 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 
+import type { RelayCall } from "../../../client/lib/kagi/protocol.ts";
 import {
   buildFetch,
   execute,
+  executeRelayed,
   scrub,
   secretsProblem,
+  summarizeSecret,
+  usesRelay,
 } from "../../../client/lib/kagi/substitute.ts";
 
 const req = {
@@ -73,4 +77,77 @@ Deno.test("execute scrubs the secret out of an echoing response", async () => {
   assertEquals(result.status, 201);
   assertEquals(result.body, `${req.url} Bearer [GH_SECRET]`);
   assertEquals(result.headers["x-echo"], "[GH_SECRET]");
+});
+
+Deno.test("a request goes through the server only with secrets marked relay, all of them", () => {
+  const req = {
+    secrets: ["A", "B"],
+    url: "https://api.example.com/",
+    headers: { a: "[A]", b: "[B]" },
+  };
+  const relayA = { value: "a", hosts: ["api.example.com"], relay: true };
+  const relayB = { value: "b", hosts: ["api.example.com"], relay: true };
+  const directB = { value: "b", hosts: ["api.example.com"] };
+
+  assertEquals(usesRelay(req, { A: relayA, B: relayB }), true);
+  assertEquals(secretsProblem(req, { A: relayA, B: relayB }), null);
+  assertEquals(usesRelay(req, { A: directB, B: directB }), false);
+  // B was not allowed through the server, and would go there with A.
+  assertEquals(usesRelay(req, { A: relayA, B: directB }), true);
+  assertStringIncludes(
+    secretsProblem(req, { A: relayA, B: directB }) ?? "",
+    "B",
+  );
+  // The clear-text summary says the same.
+  assertEquals(
+    usesRelay(req, { A: summarizeSecret(relayA), B: summarizeSecret(relayB) }),
+    true,
+  );
+});
+
+Deno.test("executeRelayed sends the filled call and scrubs the server's answer", async () => {
+  const sent: RelayCall[] = [];
+  const result = await executeRelayed(
+    {
+      secrets: ["KEY"],
+      url: "https://api.example.com/[KEY]",
+      method: "POST",
+      headers: { "x-api-key": "[KEY]" },
+      body: { key: "[KEY]" },
+    },
+    { KEY: "s3cret" },
+    (call) => {
+      sent.push(call);
+      return Promise.resolve(Response.json({
+        status: 200,
+        headers: { "x-echo": "s3cret" },
+        body: "you sent s3cret",
+      }));
+    },
+  );
+  assertEquals(sent, [{
+    url: "https://api.example.com/s3cret",
+    method: "POST",
+    headers: { "x-api-key": "s3cret", "content-type": "application/json" },
+    body: '{"key":"s3cret"}',
+  }]);
+  assertEquals(result, {
+    status: 200,
+    headers: { "x-echo": "[KEY]" },
+    body: "you sent [KEY]",
+  });
+
+  await assertRejects(
+    () =>
+      executeRelayed(
+        { secrets: ["KEY"], url: "https://api.example.com/" },
+        { KEY: "s3cret" },
+        () =>
+          Promise.resolve(
+            Response.json({ detail: "leaked s3cret" }, { status: 403 }),
+          ),
+      ),
+    Error,
+    "[KEY]",
+  );
 });

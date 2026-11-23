@@ -64,6 +64,9 @@ export default defineConfig({
         worker: WORKER,
         exportName: "KagiRoom",
       }),
+      // Makes the single-use Dynamic Worker that each relayed call runs in
+      // (`web/server/lib/kagi/relay.ts`), for APIs that do not allow CORS.
+      LOADER: bindings.workerLoader(),
       // Secret, generated and set by `web/server/set_vapid_keys.ts` (by the deploy when missing, and
       // by the `vapid-keys` workflow to rotate); declared here so a deploy keeps it.
       VAPID_KEYS: hasVapidKeys ? bindings.secret() : null,

@@ -68,6 +68,7 @@ import { connect, type KagiConnection } from "../lib/kagi/connection.ts";
 import {
   createSubscription,
   forgetSubscription,
+  postRelay,
   readSubscription,
   type Subscription,
 } from "../lib/kagi/device.ts";
@@ -94,10 +95,12 @@ import {
 } from "../lib/kagi/protocol.ts";
 import {
   execute,
+  executeRelayed,
   type GithubAppSecret,
   hostOf,
   secretsProblem,
   type SecretSummary,
+  usesRelay,
 } from "../lib/kagi/substitute.ts";
 import {
   createVault,
@@ -204,6 +207,7 @@ export const KagiApp = clientEntry(
     let nameInput: HTMLInputElement | null = null;
     let valueInput: HTMLInputElement | null = null;
     let hostsInput: HTMLInputElement | null = null;
+    let relayInput: HTMLInputElement | null = null;
     let appNameInput: HTMLInputElement | null = null;
     let appIdInput: HTMLInputElement | null = null;
     let appKeyInput: HTMLTextAreaElement | null = null;
@@ -326,13 +330,23 @@ export const KagiApp = clientEntry(
           );
         }
         if (!value) throw new Error("値を入力してください。");
-        const entries = { ...unlocked.entries, [name]: { value, hosts } };
+        const relay = relayInput?.checked ?? false;
+        if (relay && !hosts.length) {
+          throw new Error(
+            "サーバー経由で送る秘密には、送信を許すホストを指定してください。",
+          );
+        }
+        const entries = {
+          ...unlocked.entries,
+          [name]: { value, hosts, ...(relay ? { relay } : {}) },
+        };
         await unlocked.save(entries);
         unlocked.entries = entries;
         names = vaultNames();
         if (nameInput) nameInput.value = "";
         if (valueInput) valueInput.value = "";
         if (hostsInput) hostsInput.value = "";
+        if (relayInput) relayInput.checked = false;
         setStatus(`${name} を保存しました。`, "success");
       });
 
@@ -586,20 +600,36 @@ export const KagiApp = clientEntry(
         const secrets = Object.fromEntries(
           request.secrets.map((name) => [name, vault.entries[name].value]),
         );
+        // Judged on the opened vault, not on the clear-text names.
+        const relayed = usesRelay(request, vault.entries);
+        const subId = sub?.id;
+        if (relayed && !subId) {
+          throw new Error("この端末は登録されていません。");
+        }
         conn.decide(tx.id, true);
         try {
-          const result = await execute(request, secrets);
+          const result = relayed
+            ? await executeRelayed(
+              request,
+              secrets,
+              (call) => postRelay(subId!, tx.id, call),
+            )
+            : await execute(request, secrets);
           conn.complete(tx.id, result);
           setStatus(
-            `実行しました (HTTP ${result.status})。結果はリクエスト元が受け取るまでこの画面に保持されます。`,
+            `実行しました${
+              relayed ? "（kagi のサーバー経由）" : ""
+            } (HTTP ${result.status})。結果はリクエスト元が受け取るまでこの画面に保持されます。`,
             "success",
           );
         } catch (e) {
-          // Typically CORS: the API must allow this origin for a browser to call it.
           const message = errorText(e, "呼び出しに失敗しました");
           conn.fail(tx.id, message);
+          // Typically CORS: the API must allow this origin for a browser to call it.
           throw new Error(
-            `呼び出しに失敗しました: ${message}（API が CORS を許可していない可能性があります）`,
+            relayed
+              ? `呼び出しに失敗しました: ${message}`
+              : `呼び出しに失敗しました: ${message}（API が CORS を許可していない可能性があります。その場合は秘密を「kagi のサーバー経由で送る」にして登録し直してください）`,
           );
         }
       });
@@ -971,7 +1001,7 @@ export const KagiApp = clientEntry(
           ? githubApiDetails(tx.request)
           : isCreateRepoRequest(tx.request)
           ? createRepoDetails(tx.request)
-          : httpDetails(tx.request)}
+          : httpDetails(tx.request, names)}
         <dt>受付</dt>
         <dd>{formatTime(tx.createdAt)}</dd>
         {tx.error && (
@@ -1233,6 +1263,21 @@ export const KagiApp = clientEntry(
               ref((n) => (hostsInput = n as HTMLInputElement)),
             ]}
           />
+          <label mix={checkboxRowStyle}>
+            <input
+              type="checkbox"
+              mix={ref((n) => (relayInput = n as HTMLInputElement))}
+            />
+            <span>
+              kagi のサーバー経由で送る
+              <br />
+              <span mix={mutedStyle}>
+                CORS を許可していない API 向け。承認した 1
+                回の呼び出しだけ、サーバーが使い捨ての Worker
+                で代わりに呼びます。そのあいだはサーバーが値を扱います。ホストの指定が必要です。
+              </span>
+            </span>
+          </label>
         </div>
         <div mix={rowStyle}>
           <button
@@ -1597,9 +1642,10 @@ function createRepoDetails(req: GithubCreateRepoRequest) {
 
 function describeSecret(entry: SecretSummary): string {
   if (entry.kind === "github-app") return ` → GitHub App (ID ${entry.appId})`;
+  const via = entry.relay ? "（kagi のサーバー経由）" : "";
   return entry.hosts.length
-    ? ` → ${entry.hosts.join(", ")} のみ`
-    : " → 送信先の制限なし";
+    ? ` → ${entry.hosts.join(", ")} のみ${via}`
+    : ` → 送信先の制限なし${via}`;
 }
 
 /** The repositories and permissions a token is limited to. */
@@ -1660,13 +1706,22 @@ function githubApiDetails(req: GithubApiRequest) {
   );
 }
 
-function httpDetails(req: HttpRequest) {
+function httpDetails(
+  req: HttpRequest,
+  names: Record<string, SecretSummary>,
+) {
   return (
     <>
       <dt>URL</dt>
       <dd>
         <code>{req.url}</code>
       </dd>
+      {usesRelay(req, names) && (
+        <>
+          <dt>送り方</dt>
+          <dd>kagi のサーバー経由（CORS 非対応の API 向け）</dd>
+        </>
+      )}
       <dt>使う秘密</dt>
       <dd>
         {req.secrets.length
@@ -1875,6 +1930,13 @@ const formStyle = css({
   flexDirection: "column",
   gap: "0.5rem",
   marginBlock: "0.5rem",
+});
+
+const checkboxRowStyle = css({
+  display: "flex",
+  alignItems: "flex-start",
+  gap: "0.5rem",
+  "& input": { marginTop: "0.25rem" },
 });
 
 const inputStyle = css({

@@ -3,6 +3,8 @@ import { assert, assertEquals } from "@std/assert";
 import {
   challengeMessage,
   type ClientMessage,
+  RELAY_HEADERS,
+  relayMessage,
   type ServerMessage,
 } from "../../../client/lib/kagi/protocol.ts";
 import { createMemoryHub, type KagiHub } from "./hub.ts";
@@ -107,7 +109,16 @@ async function setup(now = () => Date.now()) {
     socket.emit({ type: "auth", signature });
     return socket;
   };
-  return { hub, connect, notified, confirmed, pushService };
+  /** Signs `message` with the device key, as the phone does. */
+  const sign = async (message: string, key = keys.privateKey) =>
+    new Uint8Array(
+      await crypto.subtle.sign(
+        { name: "ECDSA", hash: "SHA-256" },
+        key,
+        new TextEncoder().encode(message),
+      ),
+    ).toBase64({ alphabet: "base64url", omitPadding: true });
+  return { hub, connect, sign, notified, confirmed, pushService };
 }
 
 const submit = (hub: KagiHub, body: unknown) =>
@@ -485,4 +496,134 @@ Deno.test("unregister retires the id: requests, waits, sockets and re-registrati
     }),
   );
   assertEquals(claim.status, 410);
+});
+
+// --- relay ------------------------------------------------------------------
+
+const authorizeRelay = (hub: KagiHub, txId: string, signature: string) =>
+  hub.dispatch(
+    SUB,
+    "relay",
+    new Request(`${base}/relay`, {
+      method: "POST",
+      headers: {
+        [RELAY_HEADERS.transaction]: txId,
+        [RELAY_HEADERS.signature]: signature,
+      },
+    }),
+  );
+
+Deno.test("relay: the device key's signature allows one relay, to the request's host", async () => {
+  const { hub, sign } = await setup();
+  const { transaction_id: txId } = await (await submit(hub, ghRequest)).json();
+  const signature = await sign(relayMessage(SUB, txId));
+
+  const first = await authorizeRelay(hub, txId, signature);
+  assertEquals(first.status, 200);
+  assertEquals(await first.json(), { host: "api.github.com" });
+
+  // The same signature, again: each transaction is relayed once.
+  const second = await authorizeRelay(hub, txId, signature);
+  assertEquals(second.status, 409);
+  assertEquals(second.headers.get("content-type"), "application/problem+json");
+});
+
+Deno.test("relay: two at once still relay once", async () => {
+  const { hub, sign } = await setup();
+  const { transaction_id: txId } = await (await submit(hub, ghRequest)).json();
+  const signature = await sign(relayMessage(SUB, txId));
+  const answers = await Promise.all([
+    authorizeRelay(hub, txId, signature),
+    authorizeRelay(hub, txId, signature),
+  ]);
+  assertEquals(answers.map((r) => r.status).sort(), [200, 409]);
+});
+
+Deno.test("relay: refused without the device key's signature for that transaction", async () => {
+  const { hub, sign } = await setup();
+  const { transaction_id: txId } = await (await submit(hub, ghRequest)).json();
+  const { transaction_id: other } = await (await submit(hub, ghRequest))
+    .json();
+
+  // Signed for another transaction.
+  const wrongTx = await authorizeRelay(
+    hub,
+    txId,
+    await sign(relayMessage(SUB, other)),
+  );
+  assertEquals(wrongTx.status, 401);
+
+  // Signed by someone else's key.
+  const stranger = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign", "verify"],
+  );
+  const wrongKey = await authorizeRelay(
+    hub,
+    txId,
+    await sign(relayMessage(SUB, txId), stranger.privateKey),
+  );
+  assertEquals(wrongKey.status, 401);
+
+  // No headers at all.
+  const bare = await hub.dispatch(
+    SUB,
+    "relay",
+    new Request(`${base}/relay`, { method: "POST" }),
+  );
+  assertEquals(bare.status, 401);
+
+  // And none of these used it up.
+  assertEquals(
+    (await authorizeRelay(hub, txId, await sign(relayMessage(SUB, txId))))
+      .status,
+    200,
+  );
+});
+
+Deno.test("relay: only an open http request", async () => {
+  const { hub, connect, sign } = await setup();
+  const phone = await connect();
+  await phone.next(); // ready
+
+  const { transaction_id: rejected } = await (await submit(hub, ghRequest))
+    .json();
+  await phone.next(); // tx
+  phone.emit({ type: "decision", txId: rejected, approved: false });
+  await phone.next(); // tx rejected
+  assertEquals(
+    (await authorizeRelay(
+      hub,
+      rejected,
+      await sign(relayMessage(SUB, rejected)),
+    )).status,
+    409,
+  );
+
+  const { transaction_id: token } = await (await submit(hub, {
+    type: "github-app-token",
+    app: "GH_APP",
+    owner: "me",
+    repositories: ["r"],
+    permissions: { contents: "write" },
+  })).json();
+  assertEquals(
+    (await authorizeRelay(hub, token, await sign(relayMessage(SUB, token))))
+      .status,
+    409,
+  );
+
+  assertEquals(
+    (await authorizeRelay(hub, "nope", await sign(relayMessage(SUB, "nope"))))
+      .status,
+    404,
+  );
+});
+
+Deno.test("parseSubPath reads relay", () => {
+  assertEquals(parseSubPath(`/api/sub/${SUB}/relay`, "POST"), {
+    subId: SUB,
+    action: "relay",
+  });
 });

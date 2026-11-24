@@ -176,14 +176,21 @@ env アクセスは `web/server/config.ts` に集約し、ホスト非依存に�
 ## デプロイ (Cloudflare Workers)
 
 `.github/workflows/cloudflare.yml` が main で `deno task build:cf` →
-`deno task cf deploy --prebuilt` を走らせる。
+`deno task cf deploy --prebuilt` を走らせる。`CLOUDFLARE_API_TOKEN` は
+Cloudflare を 呼ぶステップにだけ渡す（`-A` で走るビルドには渡さない）。
+
+- `deno task cf` は `deno.json` の import と同じ版を書いて固定する（`npm:cf`
+  だけだと プレリリースを除く最新の古い CLI が走る）。`cf`
+  を上げるときは両方と、`cf` が依存 する
+  `@cloudflare/config`・`@cloudflare/build-output-utils` の版を揃える。
+- `test.yml` が `deno audit` を走らせる（ビルド用の依存も含む）。
 
 - `deno task build` (`@remix-kbn/ssg`) が `router.tsx` を `fetch()` でクロール
   して `web/dist` に静的 HTML を書き出す。クロールは `entryPoints` (`/`、og
   画像、`/sw.js`) とそこからのリンクだけを辿るので `/api/*` は静的化されない。
 - `deno bundle` で作った Worker (`web/worker-dist/worker.js`) と `web/dist` を
   `web/server/cf_build.ts` が Build Output Specification
-  (`.cloudflare/output/v0`) に並べる。`cf build` は `jsr:` を解決できないので
+  (`.cloudflare/output/v1`) に並べる。`cf build` は `jsr:` を解決できないので
   使わない。`cloudflare.config.ts` が `cf` CLI の設定（`runWorkerFirst`、
   `KagiRoom` Durable Object、`kagi.kbn.one`）。
 - 両 router に `@remix-run/cop-middleware` の `cop()` を入れてある。クロス

@@ -13,7 +13,7 @@
       "description": "Generate the VAPID key pair and store it as the Worker secret VAPID_KEYS (pass --rotate to replace one)",
       "command": "deno task --cwd web/server set-vapid-keys"
     },
-    "cf": "deno run -A npm:cf",
+    "cf": "deno run -A npm:cf@1.0.0-rc.2",
     "test": "deno test -P --ignore=web/tests",
     "test:browser": "deno task --cwd web/tests test",
     "lightpanda:install": {
@@ -41,8 +41,7 @@
     "age": "P1D",
     "exclude": [
       "jsr:@kuboon/*",
-      "jsr:@remix-kbn/*",
-      "npm:@remix-run/*"
+      "jsr:@remix-kbn/*"
     ]
   },
   "unstable": [
@@ -53,8 +52,8 @@
     "jsxImportSource": "@remix-run/component"
   },
   "imports": {
-    "@cloudflare/build-output-utils": "npm:@cloudflare/build-output-utils@0.9.1",
-    "@cloudflare/config": "npm:@cloudflare/config@0.25.0",
+    "@cloudflare/build-output-utils": "npm:@cloudflare/build-output-utils@1.0.0-rc.1",
+    "@cloudflare/config": "npm:@cloudflare/config@1.0.0-rc.1",
     "@kuboon/browser-how-to": "jsr:@kuboon/browser-how-to@^0.2.0",
     "@lightpanda/browser": "npm:@lightpanda/browser@^1.6.0",
     "@remix-kbn/apple-ui": "jsr:@remix-kbn/apple-ui@^0.1.0",
@@ -68,8 +67,8 @@
     "@remix-run/render-middleware": "npm:@remix-run/render-middleware@^1.1.0",
     "@std/assert": "jsr:@std/assert@^1.0.19",
     "canvaskit-wasm": "npm:canvaskit-wasm@^0.40.0",
-    "cf": "npm:cf@1.0.0-beta.16",
-    "puppeteer-core": "npm:puppeteer-core@^23.11.1"
+    "cf": "npm:cf@1.0.0-rc.2",
+    "puppeteer-core": "npm:puppeteer-core@^25.18.1"
   },
   "fmt": {
     "exclude": [

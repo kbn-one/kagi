@@ -249,7 +249,7 @@ export default function Docs(_handle: Handle) {
           mix={preStyle}
         >{`git config --global credential.https://github.com.useHttpPath true
 git config --global credential.https://github.com.helper \\
-  '!KAGI_URL=${SUB} deno run --allow-net=kagi.kbn.one --allow-env ${HELPER_URL}'`}</pre>
+  '!KAGI_URL=${SUB} deno run --allow-net=kagi.kbn.one --allow-env=KAGI_URL,KAGI_APP,KAGI_PERMISSIONS ${HELPER_URL}'`}</pre>
         <p>
           あとは普通に <code>git push</code>{" "}
           する。スマホに「GitHub トークン発行 owner/repo (contents:write)」
@@ -334,7 +334,7 @@ git config --global credential.https://github.com.helper \\
             <code>--public</code> か <code>--private</code>）は必ず指定する。
             <pre
               mix={preStyle}
-            >{`KAGI_URL=${SUB} deno run --allow-net=kagi.kbn.one --allow-env \
+            >{`KAGI_URL=${SUB} deno run --allow-net=kagi.kbn.one --allow-env=KAGI_URL,KAGI_APP,KAGI_PERMISSIONS \
   ${HELPER_URL} \
   create kbn-one/new-repo --public --description "…" --init`}</pre>
           </li>

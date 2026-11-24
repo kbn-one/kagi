@@ -6,7 +6,8 @@
  * request as the requester sent it (placeholders, never secret values) and how it ended — so the
  * approval screen can show what was approved, rejected or handed over long after the server has
  * dropped it. Results are never kept: they live in memory until the requester takes them
- * (`connection.ts`).
+ * (`connection.ts`). Only a result's HTTP status is, on the entry of the phone that made the call
+ * ({@link HistoryEntry}): the server never has it, so a sealed result stays sealed.
  *
  * The rest is the pure part of the screen: what status to show for an entry the server can no longer
  * update, the date format, and the range a swipe selects.
@@ -21,6 +22,12 @@ import {
 } from "./protocol.ts";
 
 const HISTORY_KEY = "kagi.history";
+
+/** A transaction as this phone keeps it: the server's copy, and what only this phone knows. */
+export type HistoryEntry = Transaction & {
+  /** The HTTP status of the result this phone handed over (never the body). */
+  resultStatus?: number;
+};
 /**
  * Entries the approver deleted, by id, with when they arrived. The server sends what it still keeps
  * on every connection, so a deleted entry would come straight back; it is ignored until the server
@@ -32,18 +39,18 @@ const DELETED_KEY = "kagi.history.deleted";
 export const MAX_HISTORY = 300;
 
 /** The entries stored on this phone, newest first. */
-export function readHistory(storage: Storage = localStorage): Transaction[] {
+export function readHistory(storage: Storage = localStorage): HistoryEntry[] {
   try {
     const raw = storage.getItem(HISTORY_KEY);
     const list = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? sortNewestFirst(list as Transaction[]) : [];
+    return Array.isArray(list) ? sortNewestFirst(list as HistoryEntry[]) : [];
   } catch {
     return [];
   }
 }
 
 export function writeHistory(
-  list: Transaction[],
+  list: HistoryEntry[],
   storage: Storage = localStorage,
 ): void {
   try {
@@ -90,7 +97,7 @@ export function writeDeleted(
   }
 }
 
-const sortNewestFirst = (list: Transaction[]) =>
+const sortNewestFirst = <T extends Transaction>(list: T[]) =>
   [...list].sort((a, b) => b.createdAt - a.createdAt);
 
 /**
@@ -98,13 +105,27 @@ const sortNewestFirst = (list: Transaction[]) =>
  * one is added, a `deleted` one stays out. Newest first, at most {@link MAX_HISTORY}.
  */
 export function mergeHistory(
-  history: readonly Transaction[],
+  history: readonly HistoryEntry[],
   seen: Iterable<Transaction>,
   deleted: ReadonlyMap<string, number> = new Map(),
-): Transaction[] {
-  const byId = new Map(history.map((t) => [t.id, t]));
-  for (const tx of seen) if (!deleted.has(tx.id)) byId.set(tx.id, tx);
+): HistoryEntry[] {
+  const byId = new Map<string, HistoryEntry>(history.map((t) => [t.id, t]));
+  for (const tx of seen) {
+    if (deleted.has(tx.id)) continue;
+    // The server's copy replaces ours, but it knows nothing of the result's status.
+    const resultStatus = byId.get(tx.id)?.resultStatus;
+    byId.set(tx.id, resultStatus === undefined ? tx : { ...tx, resultStatus });
+  }
   return sortNewestFirst([...byId.values()]).slice(0, MAX_HISTORY);
+}
+
+/** `history` with the HTTP status of the result of `txId` recorded on its entry. */
+export function withResultStatus(
+  history: readonly HistoryEntry[],
+  txId: string,
+  resultStatus: number,
+): HistoryEntry[] {
+  return history.map((t) => t.id === txId ? { ...t, resultStatus } : t);
 }
 
 /**
@@ -112,10 +133,10 @@ export function mergeHistory(
  * back).
  */
 export function removeFromHistory(
-  history: readonly Transaction[],
+  history: readonly HistoryEntry[],
   ids: Iterable<string>,
   deleted: ReadonlyMap<string, number> = new Map(),
-): { history: Transaction[]; deleted: Map<string, number> } {
+): { history: HistoryEntry[]; deleted: Map<string, number> } {
   const drop = new Set(ids);
   const marks = new Map(deleted);
   for (const t of history) if (drop.has(t.id)) marks.set(t.id, t.createdAt);

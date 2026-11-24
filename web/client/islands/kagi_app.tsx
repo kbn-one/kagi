@@ -54,6 +54,7 @@ import { agentBrief } from "../lib/kagi/brief.ts";
 import {
   clearHistory,
   formatTime,
+  type HistoryEntry,
   isPast,
   mergeHistory,
   readDeleted,
@@ -61,6 +62,7 @@ import {
   removeFromHistory,
   selectRange,
   shownStatus,
+  withResultStatus,
   writeDeleted,
   writeHistory,
 } from "../lib/kagi/history.ts";
@@ -183,7 +185,7 @@ export const KagiApp = clientEntry(
     let pushOk = false;
     let connection: KagiConnection | null = null;
     /** Every request this phone has seen, newest first (`lib/kagi/history.ts`). */
-    let history: Transaction[] = [];
+    let history: HistoryEntry[] = [];
     /** Deleted entries the server may still send (`lib/kagi/history.ts`). */
     let deleted = new Map<string, number>();
     /** Choosing history entries to delete. */
@@ -617,6 +619,9 @@ export const KagiApp = clientEntry(
             tx.id,
             seal ? await sealResult(result, seal, tx.id) : result,
           );
+          // Only the status is kept, on this phone (`history.ts`): never the body.
+          history = withResultStatus(history, tx.id, result.status);
+          writeHistory(history);
         };
 
         if (isAppTokenRequest(tx.request)) {
@@ -1074,7 +1079,7 @@ export const KagiApp = clientEntry(
 
     // --- 承認 -------------------------------------------------------------------
 
-    const requestDetails = (tx: Transaction) => (
+    const requestDetails = (tx: HistoryEntry) => (
       <dl mix={detailsStyle}>
         {isAppTokenRequest(tx.request)
           ? appTokenDetails(tx.request)
@@ -1091,6 +1096,15 @@ export const KagiApp = clientEntry(
         )}
         <dt>受付</dt>
         <dd>{formatTime(tx.createdAt)}</dd>
+        {tx.resultStatus !== undefined && (
+          <>
+            <dt>応答</dt>
+            <dd>
+              {resultStatusChip(tx.resultStatus)}{" "}
+              <span mix={mutedStyle}>（本文はどこにも残らない）</span>
+            </dd>
+          </>
+        )}
         {tx.error && (
           <>
             <dt>エラー</dt>
@@ -1107,7 +1121,7 @@ export const KagiApp = clientEntry(
     );
 
     /** A request still in play: everything about it, and the buttons while it waits. */
-    const openItem = (tx: Transaction, now: number) => {
+    const openItem = (tx: HistoryEntry, now: number) => {
       const status = shownStatus(tx, now);
       return (
         <li
@@ -1198,21 +1212,28 @@ export const KagiApp = clientEntry(
       </dialog>
     );
 
-    /** The one line a finished request folds to: when, what, how it ended. */
-    const pastSummary = (tx: Transaction, now: number) => (
+    /**
+     * What a finished request folds to, in two lines: when and how it ended (with the HTTP status
+     * this phone saw), then what it was — the method and where it went, path included, wrapped
+     * rather than cut off on a narrow screen.
+     */
+    const pastSummary = (tx: HistoryEntry, now: number) => (
       <>
         <time mix={timeStyle} dateTime={new Date(tx.createdAt).toISOString()}>
           {formatTime(tx.createdAt)}
         </time>
+        <span mix={pastStatusStyle}>
+          {tx.resultStatus !== undefined && resultStatusChip(tx.resultStatus)}
+          {statusBadge(shownStatus(tx, now))}
+        </span>
         <span mix={pastTitleStyle}>
           <strong>{headingOf(tx.request)[0]}</strong>{" "}
-          <span mix={hostStyle}>{headingOf(tx.request)[1]}</span>
+          <span mix={hostStyle}>{targetOf(tx.request)}</span>
         </span>
-        {statusBadge(shownStatus(tx, now))}
       </>
     );
 
-    const pastItem = (tx: Transaction, index: number, now: number) =>
+    const pastItem = (tx: HistoryEntry, index: number, now: number) =>
       deleting
         ? (
           <li
@@ -1814,6 +1835,37 @@ function headingOf(req: KagiRequest): [string, string] {
   return ["?", ""];
 }
 
+/**
+ * Where a request went, for a history row: the host and path of an HTTP call (its query is in the
+ * details), the path of a GitHub API call, the repositories of a token or a new repository.
+ */
+function targetOf(req: KagiRequest): string {
+  if (isAppTokenRequest(req)) {
+    return `${req.owner}/${req.repositories.join(",")}`;
+  }
+  if (isGithubApiRequest(req)) return req.path.split("?")[0];
+  if (isCreateRepoRequest(req)) return `${req.owner}/${req.name}`;
+  if (isHttpRequest(req)) {
+    // The authority as the URL reads it, then the path as written, placeholders and all; the
+    // query is left for the details.
+    const m = req.url.match(/^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)([^?#]*)/i);
+    return m ? `${m[1].toLowerCase()}${m[2]}` : req.url;
+  }
+  return "";
+}
+
+/** The HTTP status of a result, as this phone saw it; anything but 2xx stands out. */
+function resultStatusChip(status: number) {
+  return (
+    <span
+      mix={resultStatusStyle}
+      data-ok={status >= 200 && status < 300 ? "true" : "false"}
+    >
+      HTTP {status}
+    </span>
+  );
+}
+
 function createRepoDetails(req: GithubCreateRepoRequest) {
   return (
     <>
@@ -2058,11 +2110,16 @@ const pastListStyle = css({
 });
 
 /** One folded history entry: date, what it was, how it ended. */
+/**
+ * A folded history entry, in two lines: date and status on top, the request below it at full width
+ * (so its path wraps instead of being cut off on a phone).
+ */
 const pastRowStyle = css({
   display: "grid",
-  gridTemplateColumns: "auto 1fr auto",
+  gridTemplateColumns: "1fr auto",
+  gridTemplateAreas: '"time status" "title title"',
   alignItems: "center",
-  gap: "0.6rem",
+  gap: "0.25rem 0.6rem",
   padding: "0.55rem 0.8rem",
   fontSize: "0.85rem",
   cursor: "pointer",
@@ -2071,16 +2128,30 @@ const pastRowStyle = css({
 });
 
 const timeStyle = css({
+  gridArea: "time",
   color: color.muted,
   fontVariantNumeric: "tabular-nums",
   whiteSpace: "nowrap",
 });
 
 const pastTitleStyle = css({
+  gridArea: "title",
   minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
+  overflowWrap: "anywhere",
+});
+
+const pastStatusStyle = css({
+  gridArea: "status",
+  display: "flex",
+  alignItems: "center",
+  gap: "0.4rem",
+});
+
+const resultStatusStyle = css({
+  fontFamily: font.mono,
+  fontSize: "0.75rem",
+  color: color.muted,
+  "&[data-ok=false]": { color: "#dc2626" },
 });
 
 const pastFoldStyle = css({
@@ -2093,7 +2164,9 @@ const pastFoldStyle = css({
  * page, which turns them into a range selection.
  */
 const selectableStyle = css({
-  gridTemplateColumns: "auto auto 1fr auto",
+  gridTemplateColumns: "auto 1fr auto",
+  gridTemplateAreas: '"check time status" "check title title"',
+  "& > span:first-child": { gridArea: "check" },
   touchAction: "pan-y",
   userSelect: "none",
   WebkitUserSelect: "none",

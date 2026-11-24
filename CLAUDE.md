@@ -39,11 +39,14 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   ランタイムに横取りさせない。`/kagi` はページの `frame = "app"` で
   サイトのヘッダー・フッター無しの全画面（`layout.tsx`）。
 - 承認タブの履歴は `lib/kagi/history.ts`:
-  スマホが見たトランザクション（リクエスト と結末。結果は保存しない）を
-  localStorage に持つ。サーバーは 1 時間で忘れ（DO の alarm が
+  スマホが見たトランザクション（リクエスト と結末。結果の本文は保存せず、この
+  スマホが渡した結果の HTTP ステータスだけを `resultStatus` に持つ。サーバーには
+  送らない）を localStorage に持つ。サーバーは 1 時間で忘れ（DO の alarm が
   `forgetOldTransactions` で消す）、
   接続のたびに残っている分を終わったものも含めて `ready` で送る。終わったものは
-  `yyyy-mm-dd HH:mm` の 1 行に畳む。削除は削除モードで、行を横にスワイプして
+  2 行に畳む（`yyyy-mm-dd HH:mm`・HTTP ステータス・結末、その下にメソッドと
+  ホスト +
+  パス。狭い画面では折り返す）。削除は削除モードで、行を横にスワイプして
   上下になぞると範囲選択（行は `touch-action: pan-y`）。削除した id はサーバーが
   忘れるまで覚えておき、送り直されても戻さない。
 - リクエストは 4 種類（`protocol.ts` の `KagiRequest`）。

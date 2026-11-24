@@ -65,10 +65,11 @@ import {
   writeHistory,
 } from "../lib/kagi/history.ts";
 import { connect, type KagiConnection } from "../lib/kagi/connection.ts";
+import { sealedCall } from "../lib/kagi/relay_seal.ts";
 import {
   createSubscription,
   forgetSubscription,
-  postRelay,
+  openRelay,
   readSubscription,
   type Subscription,
 } from "../lib/kagi/device.ts";
@@ -612,7 +613,7 @@ export const KagiApp = clientEntry(
             ? await executeRelayed(
               request,
               secrets,
-              (call) => postRelay(subId!, tx.id, call),
+              async (call) => sealedCall(await openRelay(subId!, tx.id), call),
             )
             : await execute(request, secrets);
           conn.complete(tx.id, result);
@@ -1273,8 +1274,10 @@ export const KagiApp = clientEntry(
               <br />
               <span mix={mutedStyle}>
                 CORS を許可していない API 向け。承認した 1
-                回の呼び出しだけ、サーバーが使い捨ての Worker
-                で代わりに呼びます。そのあいだはサーバーが値を扱います。ホストの指定が必要です。
+                回の呼び出しだけ、使い捨ての Worker
+                が代わりに呼びます。呼び出しはその Worker
+                向けに暗号化して送るので、kagi
+                のサーバー本体は中身を読めません。ホストの指定が必要です。
               </span>
             </span>
           </label>

@@ -41,7 +41,7 @@ import * as Docs from "../client/pages/docs.tsx";
 import * as Kagi from "../client/pages/kagi.tsx";
 
 import { subController } from "./controllers/api/sub.ts";
-import { moduleRunner, setRelayRunner } from "./lib/kagi/relay.ts";
+import { moduleRunner, relaySub, setRelayRunner } from "./lib/kagi/relay.ts";
 import { kagiHub } from "./lib/kagi/hub.ts";
 import { parseSubPath } from "./lib/kagi/room.ts";
 import { copDenied } from "./lib/problem.ts";
@@ -189,6 +189,8 @@ export default {
     if (target?.action === "ws") {
       return kagiHub().dispatch(target.subId, "ws", request);
     }
+    // The relay's WebSocket too: the Dynamic Worker's module upgrades this very request.
+    if (target?.action === "relay") return relaySub(target.subId, request);
     return router.fetch(request);
   },
 };

@@ -40,6 +40,12 @@ export interface RoomStorage {
   put<T>(key: string, value: T): Promise<void>;
   delete(key: string): Promise<unknown>;
   list<T>(options: { prefix: string }): Promise<Map<string, T>>;
+  /**
+   * The Durable Object alarm (`KagiRoom#alarm` runs {@link forgetOldTransactions}). Missing in
+   * memory, where reading the room prunes it anyway.
+   */
+  getAlarm?(): Promise<number | null>;
+  setAlarm?(scheduledTime: number): Promise<void>;
 }
 
 export type Upgrade = (
@@ -81,6 +87,48 @@ const REG_KEY = "registration";
  */
 const RETIRED_KEY = "retired";
 const txKey = (id: string) => `tx:${id}`;
+
+/**
+ * The push services a phone's browser subscribes with (Chrome and the Chromium browsers, Safari,
+ * Firefox, Edge). The server POSTs to whatever endpoint is stored, so an endpoint anywhere else is
+ * refused rather than fetched.
+ */
+export const PUSH_SERVICE_HOSTS: readonly string[] = [
+  "fcm.googleapis.com",
+  "android.googleapis.com",
+  "push.apple.com",
+  "push.services.mozilla.com",
+  "notify.windows.com",
+];
+
+/** Whether `endpoint` is on one of {@link PUSH_SERVICE_HOSTS} (or a subdomain). */
+export function isPushServiceEndpoint(endpoint: string): boolean {
+  let host: string;
+  try {
+    host = new URL(endpoint).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return PUSH_SERVICE_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+}
+
+/**
+ * Deletes the transactions past {@link TX_RETENTION_MS} and sets the alarm for the next one to go.
+ * Run by the Durable Object's alarm, so a room nobody opens again does not keep them.
+ */
+export async function forgetOldTransactions(
+  storage: RoomStorage,
+  now: number,
+): Promise<void> {
+  const all = await storage.list<Transaction>({ prefix: "tx:" });
+  let next: number | null = null;
+  for (const [key, tx] of all) {
+    const due = tx.createdAt + TX_RETENTION_MS;
+    if (due <= now) await storage.delete(key);
+    else if (next === null || due < next) next = due;
+  }
+  if (next !== null) await storage.setAlarm?.(next);
+}
 
 const randomId = (bytes = 16): string =>
   crypto.getRandomValues(new Uint8Array(bytes)).toBase64({
@@ -228,6 +276,7 @@ export class Room {
       createdAt: this.#now(),
     };
     await this.#save(tx);
+    await this.#scheduleForget(tx);
     this.#broadcast({ type: "tx", transaction: tx });
 
     const notified = await this.#notify(registration, tx);
@@ -500,6 +549,12 @@ export class Room {
       return send({ type: "error", detail: parsed });
     }
     const { endpoint, keys: { p256dh, auth } } = parsed;
+    if (!isPushServiceEndpoint(endpoint)) {
+      return send({
+        type: "error",
+        detail: "The push endpoint is not a known push service",
+      });
+    }
     const isNew = registration.push?.endpoint !== endpoint;
     registration.push = { endpoint, keys: { p256dh, auth } };
     if (isNew) {
@@ -574,6 +629,17 @@ export class Room {
 
   // --- storage --------------------------------------------------------------
 
+  /** Makes sure the alarm goes off by the time `tx` is to be forgotten. */
+  async #scheduleForget(tx: Transaction): Promise<void> {
+    const { getAlarm, setAlarm } = this.#deps.storage;
+    if (!getAlarm || !setAlarm) return;
+    const due = tx.createdAt + TX_RETENTION_MS;
+    const current = await getAlarm.call(this.#deps.storage);
+    if (current === null || current > due) {
+      await setAlarm.call(this.#deps.storage, due);
+    }
+  }
+
   #save(tx: Transaction): Promise<void> {
     return this.#deps.storage.put(txKey(tx.id), tx);
   }
@@ -622,16 +688,53 @@ const retiredSub = () =>
       "This subscription was turned off by its approver. Ask the human for the new URL.",
   });
 
+/**
+ * The body as JSON, read no further than {@link MAX_REQUEST_BYTES}: a declared `content-length`
+ * past it is refused before reading, and an undeclared body stops being read once past it.
+ */
 async function readJson(request: Request): Promise<unknown | Response> {
-  const text = await request.text();
-  if (text.length > MAX_REQUEST_BYTES) {
-    return problem({ status: 413, detail: "Request body is too large" });
+  const tooLarge = () =>
+    problem({ status: 413, detail: "Request body is too large" });
+  const declared = Number(request.headers.get("content-length"));
+  if (declared > MAX_REQUEST_BYTES) {
+    await request.body?.cancel();
+    return tooLarge();
   }
+  const bytes = await readCapped(request.body, MAX_REQUEST_BYTES);
+  if (!bytes) return tooLarge();
   try {
-    return JSON.parse(text);
+    return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     return problem({ status: 400, detail: "Invalid JSON body" });
   }
+}
+
+/** Every byte of `body`, or null once there are more than `max` (the rest is not read). */
+async function readCapped(
+  body: ReadableStream<Uint8Array> | null,
+  max: number,
+): Promise<Uint8Array | null> {
+  if (!body) return new Uint8Array();
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(size);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out;
 }
 
 function finalResponse(tx: Transaction): Response {

@@ -39,7 +39,8 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   サイトのヘッダー・フッター無しの全画面（`layout.tsx`）。
 - 承認タブの履歴は `lib/kagi/history.ts`:
   スマホが見たトランザクション（リクエスト と結末。結果は保存しない）を
-  localStorage に持つ。サーバーは 1 時間で忘れ、
+  localStorage に持つ。サーバーは 1 時間で忘れ（DO の alarm が
+  `forgetOldTransactions` で消す）、
   接続のたびに残っている分を終わったものも含めて `ready` で送る。終わったものは
   `yyyy-mm-dd HH:mm` の 1 行に畳む。削除は削除モードで、行を横にスワイプして
   上下になぞると範囲選択（行は `touch-action: pan-y`）。削除した id はサーバーが
@@ -118,7 +119,8 @@ Web Push は `jsr:@remix-kbn/web-push` で、このサーバーが自分の VAPI
 - 購読は subscription の登録に付けて Room（Durable Object）に置く
   （`Registration.push`）。スマホが認証済みの WebSocket で
   `{ type: "push", subscription }` を送って入れ替える（止めるのは下の
-  `unregister` だけ）。 `ready` メッセージが VAPID
+  `unregister` だけ。endpoint は既知の push サービスに限る: `room.ts` の
+  `PUSH_SERVICE_HOSTS`）。 `ready` メッセージが VAPID
   公開鍵と、購読が保存済みかを返す。
 - スマホ側（`lib/kagi/connection.ts`）は通知が許可済みなら接続のたびに
   `subscribePush` して送り直す（鍵が変わっていれば作り直される）。なので購読の

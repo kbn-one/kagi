@@ -7,7 +7,7 @@ import { createController } from "@remix-run/fetch-router";
 
 import { routes } from "../../../client/routes.ts";
 import { kagiHub } from "../../lib/kagi/hub.ts";
-import { relay } from "../../lib/kagi/relay.ts";
+import { relaySub } from "../../lib/kagi/relay.ts";
 import { type RoomAction, SUB_ID } from "../../lib/kagi/room.ts";
 import { problem } from "../../lib/problem.ts";
 
@@ -33,13 +33,9 @@ export const subController = createController(routes.api.sub, {
     // The room only authorizes it; the call itself is made outside it (`relay.ts`).
     relay: ({ params, request }) => {
       const id = params.id ?? "";
-      if (!SUB_ID.test(id)) {
-        return problem({ status: 404, detail: "No such subscription" });
-      }
-      return relay(
-        request,
-        (bodiless) => kagiHub().dispatch(id, "relay", bodiless),
-      );
+      return SUB_ID.test(id)
+        ? relaySub(id, request)
+        : problem({ status: 404, detail: "No such subscription" });
     },
   },
 });

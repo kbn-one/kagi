@@ -105,7 +105,7 @@ Deno.test("a request goes through the server only with secrets marked relay, all
   );
 });
 
-Deno.test("executeRelayed sends the filled call and scrubs the server's answer", async () => {
+Deno.test("executeRelayed sends the filled call and scrubs the answer", async () => {
   const sent: RelayCall[] = [];
   const result = await executeRelayed(
     {
@@ -118,11 +118,11 @@ Deno.test("executeRelayed sends the filled call and scrubs the server's answer",
     { KEY: "s3cret" },
     (call) => {
       sent.push(call);
-      return Promise.resolve(Response.json({
+      return Promise.resolve({
         status: 200,
         headers: { "x-echo": "s3cret" },
         body: "you sent s3cret",
-      }));
+      });
     },
   );
   assertEquals(sent, [{
@@ -142,12 +142,9 @@ Deno.test("executeRelayed sends the filled call and scrubs the server's answer",
       executeRelayed(
         { secrets: ["KEY"], url: "https://api.example.com/" },
         { KEY: "s3cret" },
-        () =>
-          Promise.resolve(
-            Response.json({ detail: "leaked s3cret" }, { status: 403 }),
-          ),
+        () => Promise.reject(new Error("The call failed: leaked s3cret")),
       ),
     Error,
-    "[KEY]",
+    "leaked [KEY]",
   );
 });

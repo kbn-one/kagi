@@ -7,9 +7,9 @@
  * - **Requester** — a script or agent that wants an API call made with a secret it must not see.
  *   `POST /api/sub/:id/req` with a {@link KagiRequest}, then `GET /api/sub/:id/res?transaction_id=`.
  * - **Server** — never sees a secret. It holds the request until the approver decides, pushes a
- *   notification to the approver's phone, and relays the result back to the requester. The one
- *   exception is a call the approver sends through it ({@link RelayCall}), for an API that does not
- *   allow CORS: only with secrets the approver marked for it, and made in a throwaway isolate.
+ *   notification to the approver's phone, and relays the result back to the requester. A call the
+ *   approver has it relay ({@link RelayCall}, for an API that does not allow CORS) reaches it
+ *   only sealed for the throwaway isolate that makes the call.
  * - **Approver** — the phone. Its browser keeps the secrets (encrypted with a passkey), shows the
  *   request, and on approval fills the `[NAME]` placeholders and makes the call itself. It keeps a
  *   WebSocket open to the server ({@link ServerMessage} / {@link ClientMessage}).
@@ -221,24 +221,25 @@ export const challengeMessage = (subId: string, nonce: string): string =>
 
 /**
  * What the approver's device key signs to have the server relay the call of `txId`
- * (`POST /api/sub/:id/relay`). It is good for one call, to the host of that transaction's URL.
+ * (`GET /api/sub/:id/relay`, a WebSocket). It is good for one call, to the host of that
+ * transaction's URL.
  */
 export const relayMessage = (subId: string, txId: string): string =>
   `kagi-relay:${subId}:${txId}`;
 
-/** The headers of `POST /api/sub/:id/relay` that say which transaction, and prove who asks. */
+/**
+ * How the Worker asks the room whether a relay may go ahead: which transaction, and the device key's
+ * signature. (The phone puts them in the WebSocket URL's query as `transaction_id` and `signature`.)
+ */
 export const RELAY_HEADERS = {
   transaction: "kagi-transaction",
   signature: "kagi-signature",
 } as const;
 
 /**
- * The body of `POST /api/sub/:id/relay`: the call with its placeholders already filled.
- *
- * For APIs that do not allow this origin by CORS, the phone hands the call to the server, which
- * makes it in a single-use Dynamic Worker (`server/lib/kagi/relay.ts`) and answers with a
- * {@link KagiResult} (not yet scrubbed: the phone scrubs it). The secrets are in here in the clear,
- * so only secrets the approver marked `relay` are ever sent this way.
+ * A call with its placeholders filled, for the single-use Dynamic Worker that makes it on the
+ * phone's behalf (`server/lib/kagi/relay.ts`), for APIs that do not allow this origin by CORS. It
+ * travels only sealed ({@link RelayFrame}); only secrets the approver marked `relay` go this way.
  */
 export interface RelayCall {
   url: string;
@@ -246,6 +247,22 @@ export interface RelayCall {
   headers: Record<string, string>;
   body?: string;
 }
+
+/**
+ * The relay WebSocket, between the phone (`relay_seal.ts`) and the Dynamic Worker. `key` and `call`
+ * carry raw P-256 public keys; `call` and `result` are AES-GCM sealed with the key both derive, so
+ * the server between them sees neither the call nor the answer. A `result` opens to
+ * `{ ok: true, status, headers, body }` or `{ ok: false, detail }`. All binary is base64url.
+ */
+export type RelayFrame =
+  /** Dynamic Worker → phone, first. */
+  | { type: "key"; publicKey: string }
+  /** Phone → Dynamic Worker. */
+  | { type: "call"; publicKey: string; iv: string; data: string }
+  /** Dynamic Worker → phone, last. */
+  | { type: "result"; iv: string; data: string }
+  /** Dynamic Worker → phone: the call could not be opened (nothing secret in it). */
+  | { type: "error"; detail: string };
 
 /** `[NAME]` placeholders. Names are letters, digits and `_`. */
 export const PLACEHOLDER = /\[([A-Za-z_][A-Za-z0-9_]*)\]/g;

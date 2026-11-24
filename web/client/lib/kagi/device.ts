@@ -7,12 +7,7 @@
  * knowing a subscription id is not enough to pose as its approver.
  */
 
-import {
-  challengeMessage,
-  RELAY_HEADERS,
-  type RelayCall,
-  relayMessage,
-} from "./protocol.ts";
+import { challengeMessage, relayMessage } from "./protocol.ts";
 import { routes } from "../../routes.ts";
 
 const SUB_KEY = "kagi.sub";
@@ -113,23 +108,19 @@ export const signChallenge = (subId: string, nonce: string): Promise<string> =>
   sign(challengeMessage(subId, nonce));
 
 /**
- * Has the server make the call of transaction `txId` (`POST /api/sub/:id/relay`), for an API that
- * does not allow CORS. Signed with the device key; the server relays each transaction once.
+ * Opens the relay WebSocket for transaction `txId` (`GET /api/sub/:id/relay`), for an API that does
+ * not allow CORS. Signed with the device key; the server relays each transaction once. What goes
+ * over it is sealed end to end (`relay_seal.ts`).
  */
-export async function postRelay(
+export async function openRelay(
   subId: string,
   txId: string,
-  call: RelayCall,
-): Promise<Response> {
-  return fetch(routes.api.sub.relay.href({ id: subId }), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      [RELAY_HEADERS.transaction]: txId,
-      [RELAY_HEADERS.signature]: await sign(relayMessage(subId, txId)),
-    },
-    body: JSON.stringify(call),
-  });
+): Promise<WebSocket> {
+  const url = new URL(routes.api.sub.relay.href({ id: subId }), location.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("transaction_id", txId);
+  url.searchParams.set("signature", await sign(relayMessage(subId, txId)));
+  return new WebSocket(url);
 }
 
 /** The `detail` of a problem response, or the status. */

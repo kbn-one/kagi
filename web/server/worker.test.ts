@@ -1,11 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import worker from "./worker.ts";
 import { setKagiHub } from "./lib/kagi/hub.ts";
-import {
-  moduleRunner,
-  setRelayRunner,
-  type WorkerLoaderLike,
-} from "./lib/kagi/relay.ts";
+import { setRelayRunner, type WorkerLoaderLike } from "./lib/kagi/relay.ts";
 import { relayMessage } from "../client/lib/kagi/protocol.ts";
 
 const get = (path: string) => worker.fetch(new Request(`http://x${path}`));
@@ -158,7 +154,7 @@ Deno.test("worker forwards /api/sub to the KagiRoom Durable Object when bound", 
   setKagiHub(undefined);
 });
 
-Deno.test("worker relays an approved call through a Dynamic Worker from LOADER, once", async () => {
+Deno.test("worker hands an approved relay upgrade to a Dynamic Worker from LOADER, once", async () => {
   const id = "relayrelayrelayrelay01";
   const keys = await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
@@ -183,26 +179,6 @@ Deno.test("worker relays an approved call through a Dynamic Worker from LOADER, 
     }),
   );
   const { transaction_id: txId } = await submitted.json();
-
-  // The upstream API, as the Dynamic Worker reaches it.
-  const upstream: string[] = [];
-  const upstreamFetch = ((url: string | URL, init?: RequestInit) => {
-    upstream.push(`${url} ${new Headers(init?.headers).get("x-api-key")}`);
-    return Promise.resolve(new Response("pong"));
-  }) as typeof fetch;
-  const run = moduleRunner(upstreamFetch);
-  const loads: string[] = [];
-  const LOADER: WorkerLoaderLike = {
-    load: (code) => {
-      loads.push(code.env?.HOST ?? "");
-      return {
-        getEntrypoint: () => ({
-          fetch: (r: Request) => run(r, code.env!.HOST),
-        }),
-      };
-    },
-  };
-
   const signature = new Uint8Array(
     await crypto.subtle.sign(
       { name: "ECDSA", hash: "SHA-256" },
@@ -210,48 +186,50 @@ Deno.test("worker relays an approved call through a Dynamic Worker from LOADER, 
       new TextEncoder().encode(relayMessage(id, txId)),
     ),
   ).toBase64({ alphabet: "base64url", omitPadding: true });
-  const relayOnce = () =>
-    worker.fetch(
-      new Request(`http://x/api/sub/${id}/relay`, {
-        method: "POST",
-        headers: {
-          "sec-fetch-site": "same-origin",
-          "kagi-transaction": txId,
-          "kagi-signature": signature,
-        },
-        body: JSON.stringify({
-          url: "https://no-cors.example/v1",
-          method: "GET",
-          headers: { "x-api-key": "s3cret" },
+
+  const loads: string[] = [];
+  const forwarded: string[] = [];
+  const LOADER: WorkerLoaderLike = {
+    load: (code) => {
+      loads.push(code.env?.HOST ?? "");
+      return {
+        getEntrypoint: () => ({
+          fetch: (r: Request) => {
+            forwarded.push(r.headers.get("upgrade") ?? "");
+            return Promise.resolve(new Response("upgraded"));
+          },
         }),
-      }),
+      };
+    },
+  };
+  const open = () =>
+    worker.fetch(
+      new Request(
+        `http://x/api/sub/${id}/relay?transaction_id=${txId}&signature=${signature}`,
+        { headers: { upgrade: "websocket" } },
+      ),
       { LOADER },
     );
   try {
-    const res = await relayOnce();
-    assertEquals(res.status, 200);
-    assertEquals(await res.json(), {
-      status: 200,
-      headers: { "content-type": "text/plain;charset=UTF-8" },
-      body: "pong",
-    });
+    const res = await open();
+    assertEquals(await res.text(), "upgraded");
     assertEquals(loads, ["no-cors.example"]);
-    assertEquals(upstream, ["https://no-cors.example/v1 s3cret"]);
+    assertEquals(forwarded, ["websocket"]);
 
-    await assertProblem(await relayOnce(), 409);
-    assertEquals(upstream.length, 1);
+    await assertProblem(await open(), 409);
+    assertEquals(loads.length, 1);
   } finally {
     setRelayRunner(null);
   }
 });
 
-Deno.test("worker refuses a cross-origin relay before it reaches the room", async () => {
+Deno.test("worker refuses a relay without the device key's signature", async () => {
   const res = await worker.fetch(
-    new Request("http://x/api/sub/relayrelayrelayrelay02/relay", {
-      method: "POST",
-      headers: { origin: "http://evil.example" },
-      body: "{}",
-    }),
+    new Request(
+      "http://x/api/sub/relayrelayrelayrelay01/relay?transaction_id=t&signature=bad",
+      { headers: { upgrade: "websocket" } },
+    ),
   );
-  await assertProblem(res, 403);
+  assertEquals(res.status >= 400, true);
+  await res.body?.cancel();
 });

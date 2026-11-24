@@ -25,9 +25,10 @@ export interface TextSecret {
   value: string;
   hosts: string[];
   /**
-   * Calls with this secret go through the server (`server/lib/kagi/relay.ts`) instead of straight
-   * from this browser: for APIs that do not allow this origin by CORS. The server then has the
-   * value in the clear for the one call, so it is the approver's choice, secret by secret.
+   * Calls with this secret are made by a single-use Dynamic Worker on the server
+   * (`server/lib/kagi/relay.ts`) instead of straight from this browser: for APIs that do not allow
+   * this origin by CORS. The call reaches it sealed, but the value then leaves the phone, so it is
+   * the approver's choice, secret by secret.
    */
   relay?: boolean;
 }
@@ -191,42 +192,44 @@ export async function execute(
   };
 }
 
-/**
- * Has the server make the call (`postRelay` in `device.ts`) and returns its answer scrubbed, as
- * {@link execute} does for a call made here.
- */
-export async function executeRelayed(
-  req: HttpRequest,
-  secrets: Secrets,
-  post: (call: RelayCall) => Promise<Response>,
-): Promise<KagiResult> {
+/** The call a request makes, filled in, as the relay carries it (sealed). */
+export function relayCallOf(req: HttpRequest, secrets: Secrets): RelayCall {
   const { url, init } = buildFetch(req, secrets);
   const headers: Record<string, string> = {};
   (init.headers as Headers).forEach((v, k) => {
     headers[k] = v;
   });
-  const res = await post({
+  return {
     url,
     method: init.method ?? "GET",
     headers,
     ...(typeof init.body === "string" ? { body: init.body } : {}),
-  });
-  const answer = await res.json().catch(() => null) as
-    | (KagiResult & { detail?: unknown })
-    | null;
-  if (!res.ok || !answer || typeof answer.status !== "number") {
-    const detail = typeof answer?.detail === "string"
-      ? answer.detail
-      : `HTTP ${res.status}`;
+  };
+}
+
+/**
+ * Has the call made through the relay (`send`: `sealedCall` over `openRelay`) and returns its
+ * answer with every secret scrubbed out, as {@link execute} does for a call made here.
+ */
+export async function executeRelayed(
+  req: HttpRequest,
+  secrets: Secrets,
+  send: (call: RelayCall) => Promise<KagiResult>,
+): Promise<KagiResult> {
+  let answer: KagiResult;
+  try {
+    answer = await send(relayCallOf(req, secrets));
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
     throw new Error(`中継できませんでした: ${scrub(detail, secrets)}`);
   }
-  const scrubbed: Record<string, string> = {};
+  const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(answer.headers ?? {})) {
-    scrubbed[k] = scrub(String(v), secrets);
+    headers[k] = scrub(String(v), secrets);
   }
   return {
     status: answer.status,
-    headers: scrubbed,
+    headers,
     body: scrub(String(answer.body ?? ""), secrets),
   };
 }

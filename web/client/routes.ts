@@ -33,10 +33,11 @@ export const routes = route("", {
       /** The approver's WebSocket. */
       ws: get("/:id/ws"),
       /**
-       * The approver has the server make an approved call, for an API without CORS
-       * (`server/lib/kagi/relay.ts`). Signed with the device key; once per transaction.
+       * The approver's WebSocket to a single-use Dynamic Worker that makes an approved call, for an
+       * API without CORS (`server/lib/kagi/relay.ts`). Signed with the device key; once per
+       * transaction; sealed end to end.
        */
-      relay: post("/:id/relay"),
+      relay: get("/:id/relay"),
     }),
   }),
 });

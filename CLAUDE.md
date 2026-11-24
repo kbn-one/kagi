@@ -189,6 +189,9 @@ Cloudflare を 呼ぶステップにだけ渡す（`-A` で走るビルドには
   を上げるときは両方と、`cf` が依存 する
   `@cloudflare/config`・`@cloudflare/build-output-utils` の版を揃える。
 - `test.yml` が `deno audit` を走らせる（ビルド用の依存も含む）。
+- ダッシュボードで Worker の設定（secret の削除など）を変えると、次の
+  `cf deploy` は「リモートの設定を上書きする」と言って止まる。差が意図どおりなら
+  Actions の `cloudflare` を `force` 付きで手動実行する（push では付かない）。
 
 - `deno task build` (`@remix-kbn/ssg`) が `router.tsx` を `fetch()` でクロール
   して `web/dist` に静的 HTML を書き出す。クロールは `entryPoints` (`/`、og

@@ -1106,16 +1106,22 @@ export const KagiApp = clientEntry(
           {requestDetails(tx)}
           {status === "pending" && (
             <div mix={rowStyle}>
+              {
+                /*
+                 * Opens this request's own dialog rather than approving: the list moves as requests
+                 * come and go, and a tap meant for one must not land on another (`approveDialog`).
+                 */
+              }
               <button
                 type="button"
                 disabled={busy || connection?.state !== "online"}
                 mix={[
                   actionStyle,
                   primaryStyle,
-                  on("click", () => void onApprove(tx)),
+                  on("click", () => approveDialogOf(tx)?.showModal()),
                 ]}
               >
-                パスキーで承認して実行
+                承認…
               </button>
               <button
                 type="button"
@@ -1130,9 +1136,51 @@ export const KagiApp = clientEntry(
               </button>
             </div>
           )}
+          {status === "pending" && approveDialog(tx)}
         </li>
       );
     };
+
+    /**
+     * The one place a request is approved: a modal showing that request alone, whose id is the
+     * transaction's, so nothing arriving or leaving the list behind it can change what it approves.
+     */
+    const approveDialog = (tx: Transaction) => (
+      <dialog id={approveDialogId(tx)} mix={dialogStyle}>
+        <div mix={rowStyle}>
+          <strong>{headingOf(tx.request)[0]}</strong>
+          <strong mix={hostStyle}>{headingOf(tx.request)[1]}</strong>
+        </div>
+        {requestDetails(tx)}
+        <p mix={mutedStyle}>この内容で実行します。違うものなら「やめる」。</p>
+        <div mix={rowStyle}>
+          <button
+            type="button"
+            disabled={busy || connection?.state !== "online"}
+            mix={[
+              actionStyle,
+              primaryStyle,
+              on("click", () => {
+                approveDialogOf(tx)?.close();
+                void onApprove(tx);
+              }),
+            ]}
+          >
+            パスキーで承認して実行
+          </button>
+          <button
+            type="button"
+            mix={[
+              actionStyle,
+              on("click", () =>
+                approveDialogOf(tx)?.close()),
+            ]}
+          >
+            やめる
+          </button>
+        </div>
+      </dialog>
+    );
 
     /** The one line a finished request folds to: when, what, how it ended. */
     const pastSummary = (tx: Transaction, now: number) => (
@@ -1185,7 +1233,12 @@ export const KagiApp = clientEntry(
               承認待ちのリクエストはありません。来たら通知します。
             </p>
           )}
-          <ul mix={listStyle}>{open.map((tx) => openItem(tx, now))}</ul>
+          {
+            /* Oldest first: a new request lands below, not on top of what is being read. */
+          }
+          <ul mix={listStyle}>
+            {[...open].reverse().map((tx) => openItem(tx, now))}
+          </ul>
           {past.length > 0 && (
             <section aria-label="履歴">
               <div mix={historyHeadStyle}>
@@ -1948,6 +2001,27 @@ const rowButtonsStyle = css({
 });
 
 const focusStyle = css({ borderColor: color.accent, borderWidth: "2px" });
+
+const approveDialogId = (tx: Transaction) => `approve-${tx.id}`;
+
+/**
+ * A request's approval dialog. Opened and closed from click handlers rather than with invoker
+ * commands (`commandfor`): those need Safari 26.2, and kagi runs on iOS 18 and later.
+ */
+const approveDialogOf = (tx: Transaction) =>
+  document.getElementById(approveDialogId(tx)) as HTMLDialogElement | null;
+
+const dialogStyle = css({
+  width: "min(32rem, calc(100vw - 2rem))",
+  maxHeight: "calc(100dvh - 2rem)",
+  padding: "1rem",
+  border: `1px solid ${color.border}`,
+  borderRadius: radius.md,
+  background: color.bg,
+  color: "inherit",
+  "&[open]": { display: "flex", flexDirection: "column", gap: "0.6rem" },
+  "&::backdrop": { background: "rgb(0 0 0 / 0.45)" },
+});
 
 const historyHeadStyle = css({
   display: "flex",

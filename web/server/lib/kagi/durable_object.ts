@@ -9,7 +9,12 @@
 
 import { problem } from "../problem.ts";
 import { approvalPush } from "./notify.ts";
-import { parseSubPath, Room, type RoomStorage } from "./room.ts";
+import {
+  forgetOldTransactions,
+  parseSubPath,
+  Room,
+  type RoomStorage,
+} from "./room.ts";
 import { upgradeWebSocket } from "./upgrade.ts";
 
 export interface DurableObjectStateLike {
@@ -33,5 +38,10 @@ export class KagiRoom {
       push: approvalPush,
     });
     return this.#room.handle(request, target.action);
+  }
+
+  /** Set when a transaction arrives: forgets the ones past retention, nobody needing to ask. */
+  alarm(): Promise<void> {
+    return forgetOldTransactions(this.#state.storage, Date.now());
   }
 }

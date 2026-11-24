@@ -3,8 +3,8 @@ import { csp, getCspNonce } from "@remix-run/csp-middleware";
 /**
  * The Content Security Policy for every HTML response: a "strict CSP". Scripts run only with this
  * request's nonce, and what they import from there is trusted (`'strict-dynamic'`), so the islands'
- * chunks need no allowlist. Plugins and a
- * rewritten `<base>` are off.
+ * chunks need no allowlist. Plugins, a rewritten `<base>` and being framed are off. The other
+ * security headers are in `security_headers.ts`.
  *
  * `csp()` makes the nonce; `render()` stamps it on what it generates (the import map, module
  * preloads, `css()` styles) and the shell (`client/layout.tsx`) puts it on the tags it authors.
@@ -15,6 +15,8 @@ export const contentSecurityPolicy = csp({
     scriptSrc: [`'nonce-${nonce}'`, "'strict-dynamic'"],
     objectSrc: ["'none'"],
     baseUri: ["'none'"],
+    // No page of this site is shown inside another's frame (clickjacking the approve button).
+    frameAncestors: ["'none'"],
   }),
 });
 

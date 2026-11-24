@@ -191,6 +191,11 @@ env アクセスは `web/server/config.ts` に集約し、ホスト非依存に�
   バインディングから静的 HTML を取って、ビルド時の nonce をリクエストごとの
   nonce に差し替え、同じ `csp()` でヘッダーを付ける
   （`no-store`）。JS・CSS・画像・`sw.js`・manifest は Worker を通らない。
+- CSP は `frame-ancestors 'none'`。ほかのセキュリティヘッダー（HSTS・`nosniff`・
+  `Referrer-Policy: no-referrer`・`X-Frame-Options`）は
+  `web/server/security_headers.ts` に一つだけ置き、Worker の応答は
+  `withSecurityHeaders`、`deno serve` は router の middleware、静的ファイルは
+  `cf_build.ts` が `web/dist/_headers` に書いて付ける。
 
 ## GitHub Actions の lockfile
 

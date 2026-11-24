@@ -45,7 +45,7 @@ export default function Docs(_handle: Handle) {
             「パスキーを作成」を押し、秘密を追加する。秘密は localStorage
             に、パスキーから導いた鍵で暗号化して置かれ、サーバーには送られない。
             秘密ごとに送信を許すホスト（例: <code>api.github.com</code>
-            ）を指定しておくと、別のホストへは送れなくなる。
+            ）を必ず指定する。別のホストへは送れない。
           </li>
           <li>
             <a href={routes.kagi.href()}>kagi</a>{" "}
@@ -127,7 +127,9 @@ export default function Docs(_handle: Handle) {
             <code>url</code>
           </dt>
           <dd>
-            http(s) の絶対 URL。ホスト部分には <code>[NAME]</code> を使えない
+            https の絶対 URL（<code>user@</code> 付きは不可）。ホスト部分には
+            {" "}
+            <code>[NAME]</code> を使えない
           </dd>
           <dt>
             <code>method</code>
@@ -288,7 +290,10 @@ git config --global credential.https://github.com.helper \\
   }'`}</pre>
         <p>
           <code>repositories</code> と <code>permissions</code>{" "}
-          は空にできない（GitHub は空を「全部」と解釈するため）。結果の{" "}
+          は空にできない（GitHub は空を「全部」と解釈するため）。
+          <code>permissions</code>{" "}
+          はリポジトリの権限だけ（組織・アカウントの権限は{" "}
+          <code>repositories</code> で絞られないので受け付けない）。結果の{" "}
           <code>body</code> は GitHub の応答（
           <code>token</code>、<code>expires_at</code> など）。
         </p>

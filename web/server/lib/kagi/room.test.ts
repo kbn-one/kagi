@@ -10,7 +10,16 @@ import {
 import { sealResult } from "../../../client/lib/kagi/result_seal.ts";
 import { createMemoryHub, type KagiHub } from "./hub.ts";
 import type { ApprovalPush, NotifyOutcome } from "./notify.ts";
-import { parseSubPath, PENDING_TTL_MS, type Upgrade } from "./room.ts";
+import {
+  forgetOldTransactions,
+  isPushServiceEndpoint,
+  MemoryStorage,
+  parseSubPath,
+  PENDING_TTL_MS,
+  Room,
+  TX_RETENTION_MS,
+  type Upgrade,
+} from "./room.ts";
 
 /** The server's half of a WebSocket, driven by the test as the phone. */
 class FakeSocket extends EventTarget {
@@ -149,7 +158,7 @@ const ready = (push = false): ServerMessage => ({
   push,
 });
 
-const subscription = (endpoint = "https://push.example/1") => ({
+const subscription = (endpoint = "https://fcm.googleapis.com/fcm/send/1") => ({
   endpoint,
   expirationTime: null,
   keys: { p256dh: "p", auth: "a" },
@@ -166,7 +175,7 @@ Deno.test("approve → done → requester gets the result once", async () => {
   assertEquals(res.status, 202);
   const { transaction_id: txId, notified: pushed } = await res.json();
   assertEquals(pushed, true);
-  assertEquals(notified, [`https://push.example/1 ${txId}`]);
+  assertEquals(notified, [`https://fcm.googleapis.com/fcm/send/1 ${txId}`]);
 
   const announced = await phone.next();
   assert(announced.type === "tx");
@@ -381,21 +390,30 @@ Deno.test("the push subscription is replaced, validated, and survives a reconnec
   await phone.next(); // ready
   phone.emit({ type: "push", subscription: subscription("http://plain/1") });
   assertEquals((await phone.next()).type, "error");
+  // https, but not a push service: the server would POST wherever it says.
   phone.emit({
     type: "push",
-    subscription: subscription("https://push.example/1"),
+    subscription: subscription("https://internal.example/hook"),
+  });
+  assertEquals(await phone.next(), {
+    type: "error",
+    detail: "The push endpoint is not a known push service",
+  });
+  phone.emit({
+    type: "push",
+    subscription: subscription("https://fcm.googleapis.com/fcm/send/1"),
   });
   await phone.next();
   phone.emit({
     type: "push",
-    subscription: subscription("https://push.example/2"),
+    subscription: subscription("https://fcm.googleapis.com/fcm/send/2"),
   });
   await phone.next();
   phone.close();
 
   assertEquals(await (await connect()).next(), ready(true));
   const { transaction_id: txId } = await (await submit(hub, ghRequest)).json();
-  assertEquals(notified, [`https://push.example/2 ${txId}`]);
+  assertEquals(notified, [`https://fcm.googleapis.com/fcm/send/2 ${txId}`]);
 });
 
 Deno.test("a subscription the push service says is gone is forgotten, and the phone is told", async () => {
@@ -433,20 +451,23 @@ Deno.test("a new push subscription gets a confirmation push, a resent one does n
   await phone.next();
   phone.emit({
     type: "push",
-    subscription: subscription("https://push.example/1"),
+    subscription: subscription("https://fcm.googleapis.com/fcm/send/1"),
   });
   await phone.next();
   phone.emit({
     type: "push",
-    subscription: subscription("https://push.example/1"),
+    subscription: subscription("https://fcm.googleapis.com/fcm/send/1"),
   });
   await phone.next();
   phone.emit({
     type: "push",
-    subscription: subscription("https://push.example/2"),
+    subscription: subscription("https://fcm.googleapis.com/fcm/send/2"),
   });
   await phone.next();
-  assertEquals(confirmed, ["https://push.example/1", "https://push.example/2"]);
+  assertEquals(confirmed, [
+    "https://fcm.googleapis.com/fcm/send/1",
+    "https://fcm.googleapis.com/fcm/send/2",
+  ]);
 });
 
 Deno.test("unregister retires the id: requests, waits, sockets and re-registration all get 410", async () => {
@@ -715,4 +736,121 @@ Deno.test("a sealed result goes through as sealed_response, and an unsealed one 
   const problem = await clear.res.json();
   assertEquals(problem.transaction_status, "failed");
   assert(!JSON.stringify(problem).includes("secret answer"));
+});
+
+// --- limits -----------------------------------------------------------------
+
+Deno.test("isPushServiceEndpoint knows the browsers' push services, and nothing else", () => {
+  for (
+    const url of [
+      "https://fcm.googleapis.com/fcm/send/abc",
+      "https://web.push.apple.com/QGx",
+      "https://updates.push.services.mozilla.com/wpush/v2/x",
+      "https://wns2-par02p.notify.windows.com/w/?token=x",
+    ]
+  ) assert(isPushServiceEndpoint(url), url);
+  for (
+    const url of [
+      "https://evil.example/fcm.googleapis.com",
+      "https://fcm.googleapis.com.evil.example/x",
+      "https://notpush.apple.com.example/x",
+      "not a url",
+    ]
+  ) assert(!isPushServiceEndpoint(url), url);
+});
+
+Deno.test("a body is limited in bytes, declared or not", async () => {
+  const { hub } = await setup();
+  const post = (body: BodyInit, headers: HeadersInit = {}) =>
+    hub.dispatch(
+      SUB,
+      "req",
+      new Request(`${base}/req`, { method: "POST", body, headers }),
+    );
+
+  // Declared too large: refused without reading.
+  assertEquals(
+    (await post("{}", { "content-length": String(64 * 1024 + 1) })).status,
+    413,
+  );
+
+  // Streamed, with no length: stops once past the limit.
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) {
+      for (let i = 0; i < 100; i++) c.enqueue(new Uint8Array(1024).fill(32));
+      c.close();
+    },
+  });
+  assertEquals((await post(stream)).status, 413);
+
+  // Under the limit in characters, over it in bytes.
+  const wide = JSON.stringify({ ...ghRequest, body: "あ".repeat(30_000) });
+  assert(wide.length < 64 * 1024);
+  assertEquals((await post(wide)).status, 413);
+});
+
+/** Memory storage with a Durable Object alarm. */
+class AlarmStorage extends MemoryStorage {
+  alarm: number | null = null;
+  getAlarm() {
+    return Promise.resolve(this.alarm);
+  }
+  setAlarm(t: number) {
+    this.alarm = t;
+    return Promise.resolve();
+  }
+}
+
+Deno.test("a transaction sets the alarm that forgets it, and the alarm does", async () => {
+  let now = 1_000_000;
+  const storage = new AlarmStorage();
+  const room = new Room(SUB, {
+    storage,
+    upgrade: () => {
+      throw new Error("no sockets here");
+    },
+    push: {
+      applicationServerKey: () => Promise.resolve(null),
+      notify: () => Promise.resolve("sent"),
+      confirm: () => Promise.resolve("sent"),
+    },
+    now: () => now,
+  });
+  const keys = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign", "verify"],
+  );
+  const publicKey = await crypto.subtle.exportKey("jwk", keys.publicKey);
+  await room.handle(
+    new Request(base, { method: "PUT", body: JSON.stringify({ publicKey }) }),
+    "register",
+  );
+  const submitAt = async (t: number) => {
+    now = t;
+    const res = await room.handle(
+      new Request(`${base}/req`, {
+        method: "POST",
+        body: JSON.stringify(ghRequest),
+      }),
+      "req",
+    );
+    return (await res.json()).transaction_id as string;
+  };
+
+  await submitAt(1_000_000);
+  assertEquals(storage.alarm, 1_000_000 + TX_RETENTION_MS);
+  await submitAt(2_000_000);
+  // The earlier one is still the first to go.
+  assertEquals(storage.alarm, 1_000_000 + TX_RETENTION_MS);
+
+  // The alarm goes off: the first is forgotten, the alarm moves to the second.
+  await forgetOldTransactions(storage, 1_000_000 + TX_RETENTION_MS);
+  assertEquals((await storage.list({ prefix: "tx:" })).size, 1);
+  assertEquals(storage.alarm, 2_000_000 + TX_RETENTION_MS);
+
+  await forgetOldTransactions(storage, 2_000_000 + TX_RETENTION_MS);
+  assertEquals((await storage.list({ prefix: "tx:" })).size, 0);
+  // The registration stays.
+  assert(await storage.get("registration"));
 });

@@ -29,8 +29,9 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   保存済みのまま（`textSecretFrom`）。「追加」は既存の名前を拒む）、`device.ts`（subscription
   と IndexedDB の非 extractable ECDSA
   端末鍵）、`connection.ts`（WebSocket。結果はメモリにだけ保持）、
-  `substitute.ts`（`[NAME]` の置換、送信先ホスト制限、結果からの秘密の除去）、
-  `brief.ts`（AI エージェントに渡す説明。URL 入り、秘密は名前だけ。設定タブの
+  `substitute.ts`（`[NAME]` の置換、送信先ホスト制限（必須。未設定の古い秘密は
+  使えない）、結果からの秘密の除去）、 `brief.ts`（AI
+  エージェントに渡す説明。URL 入り、秘密は名前だけ。設定タブの
   「リクエスト元の設定」からコピー）、 画面は
   `islands/kagi_app.tsx`（`/kagi`）。準備が済んだら `jsr:@remix-kbn/apple-ui` の
   `TabView` で 承認（`#approve`、既定）・金庫（`#vault`）・設定
@@ -39,7 +40,8 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   サイトのヘッダー・フッター無しの全画面（`layout.tsx`）。
 - 承認タブの履歴は `lib/kagi/history.ts`:
   スマホが見たトランザクション（リクエスト と結末。結果は保存しない）を
-  localStorage に持つ。サーバーは 1 時間で忘れ、
+  localStorage に持つ。サーバーは 1 時間で忘れ（DO の alarm が
+  `forgetOldTransactions` で消す）、
   接続のたびに残っている分を終わったものも含めて `ready` で送る。終わったものは
   `yyyy-mm-dd HH:mm` の 1 行に畳む。削除は削除モードで、行を横にスワイプして
   上下になぞると範囲選択（行は `touch-action: pan-y`）。削除した id はサーバーが
@@ -55,7 +57,9 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   - `github-api`: 同じように絞ったトークンをスマホが発行して `api.github.com` +
     `path` を 1 回呼び、直後に revoke する。トークンは
     スマホの外に出ず、応答（トークンは `[APP]` に置換）だけを返す。
-    `/repos/OWNER/REPO/…` の path は `owner`・`repositories` の中に限る。
+    `/repos/OWNER/REPO/…` の path は `owner`・`repositories` の中に限る（path の
+    `%2e`・`%2f`・`%5c` は不可）。`permissions` はリポジトリの権限だけ
+    （`protocol.ts` の `REPOSITORY_PERMISSIONS`）。
   - `github-create-repo`: スマホが App でリポジトリを作り（作成用トークンは
     スマホ内で使い捨て、直後に revoke）、名前と URL だけを返す。公開範囲は
     必須。CLI は
@@ -123,7 +127,8 @@ Web Push は `jsr:@remix-kbn/web-push` で、このサーバーが自分の VAPI
 - 購読は subscription の登録に付けて Room（Durable Object）に置く
   （`Registration.push`）。スマホが認証済みの WebSocket で
   `{ type: "push", subscription }` を送って入れ替える（止めるのは下の
-  `unregister` だけ）。 `ready` メッセージが VAPID
+  `unregister` だけ。endpoint は既知の push サービスに限る: `room.ts` の
+  `PUSH_SERVICE_HOSTS`）。 `ready` メッセージが VAPID
   公開鍵と、購読が保存済みかを返す。
 - スマホ側（`lib/kagi/connection.ts`）は通知が許可済みなら接続のたびに
   `subscribePush` して送り直す（鍵が変わっていれば作り直される）。なので購読の
@@ -196,6 +201,11 @@ env アクセスは `web/server/config.ts` に集約し、ホスト非依存に�
   バインディングから静的 HTML を取って、ビルド時の nonce をリクエストごとの
   nonce に差し替え、同じ `csp()` でヘッダーを付ける
   （`no-store`）。JS・CSS・画像・`sw.js`・manifest は Worker を通らない。
+- CSP は `frame-ancestors 'none'`。ほかのセキュリティヘッダー（HSTS・`nosniff`・
+  `Referrer-Policy: no-referrer`・`X-Frame-Options`）は
+  `web/server/security_headers.ts` に一つだけ置き、Worker の応答は
+  `withSecurityHeaders`、`deno serve` は router の middleware、静的ファイルは
+  `cf_build.ts` が `web/dist/_headers` に書いて付ける。
 
 ## GitHub Actions の lockfile
 

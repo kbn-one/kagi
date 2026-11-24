@@ -290,6 +290,11 @@ export function placeholdersIn(value: unknown, out = new Set<string>()) {
 export const methodOf = (req: HttpRequest | GithubApiRequest): string =>
   (req.method ?? (req.body === undefined ? "GET" : "POST")).toUpperCase();
 
+/** An HTTP token (RFC 9110 §5.6.2), with placeholders standing in for what they become. */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+/** What `Headers` accepts in a value: no control characters but tab, nothing past U+00FF. */
+const HEADER_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/;
+
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 
 /**
@@ -356,6 +361,13 @@ export function parseKagiRequest(value: unknown): KagiRequest | string {
     headers = {};
     for (const [k, h] of Object.entries(v.headers)) {
       if (typeof h !== "string") return "headers must be an object of strings";
+      // Refused here rather than by the phone's browser, whose error can quote the filled value.
+      if (!HEADER_NAME.test(k.replace(PLACEHOLDER, "x"))) {
+        return `Invalid header name: ${JSON.stringify(k)}`;
+      }
+      if (!HEADER_VALUE.test(h)) {
+        return `Header ${k} has characters a header cannot carry`;
+      }
       headers[k] = h;
     }
   }

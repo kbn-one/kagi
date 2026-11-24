@@ -100,6 +100,7 @@ import {
   type GithubAppSecret,
   hostOf,
   isAppSecret,
+  scrub,
   secretsProblem,
   type SecretSummary,
   textSecretFrom,
@@ -689,7 +690,11 @@ export const KagiApp = clientEntry(
             "success",
           );
         } catch (e) {
-          const message = errorText(e, "呼び出しに失敗しました");
+          // Goes to the requester: never with a secret in it (`execute` scrubs too).
+          const message = scrub(
+            errorText(e, "呼び出しに失敗しました"),
+            secrets,
+          );
           conn.fail(tx.id, message);
           // Typically CORS: the API must allow this origin for a browser to call it.
           throw new Error(

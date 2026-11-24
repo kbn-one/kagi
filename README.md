@@ -78,7 +78,7 @@ kagi の Worker・Durable Object が運ぶのは暗号文だけで、ログや�
    ```bash
    git config --global credential.https://github.com.useHttpPath true
    git config --global credential.https://github.com.helper \
-     '!KAGI_URL=https://kagi.kbn.one/api/sub/<id> deno run --allow-net=kagi.kbn.one --allow-env https://raw.githubusercontent.com/kbn-one/kagi/main/tools/git_credential_kagi.ts'
+     '!KAGI_URL=https://kagi.kbn.one/api/sub/<id> deno run --allow-net=kagi.kbn.one --allow-env=KAGI_URL,KAGI_APP,KAGI_PERMISSIONS https://raw.githubusercontent.com/kbn-one/kagi/main/tools/git_credential_kagi.ts'
    ```
 
 以後 `git push` のたびに、git が push 先の `owner/repo` を helper に渡し、helper
@@ -129,7 +129,7 @@ App に Repository permissions の **Repository creation: Read and write**
 を足し、 エージェント側で同じファイルを `create` で実行する（公開範囲は必須）:
 
 ```bash
-KAGI_URL=https://kagi.kbn.one/api/sub/<id> deno run --allow-net=kagi.kbn.one --allow-env \
+KAGI_URL=https://kagi.kbn.one/api/sub/<id> deno run --allow-net=kagi.kbn.one --allow-env=KAGI_URL,KAGI_APP,KAGI_PERMISSIONS \
   https://raw.githubusercontent.com/kbn-one/kagi/main/tools/git_credential_kagi.ts \
   create kbn-one/new-repo --public --description "…" --init
 ```

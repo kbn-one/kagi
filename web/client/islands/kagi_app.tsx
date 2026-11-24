@@ -1971,7 +1971,7 @@ function gitHelperConfig(
   })();
   return `git config --global credential.https://github.com.useHttpPath true
 git config --global credential.https://github.com.helper \\
-  '!KAGI_URL=${base} deno run --allow-net=${host} --allow-env https://raw.githubusercontent.com/kbn-one/kagi/main/tools/git_credential_kagi.ts'`;
+  '!KAGI_URL=${base} deno run --allow-net=${host} --allow-env=KAGI_URL,KAGI_APP,KAGI_PERMISSIONS https://raw.githubusercontent.com/kbn-one/kagi/main/tools/git_credential_kagi.ts'`;
 }
 
 function usage(endpoint: (path: string) => string, id: string): string {

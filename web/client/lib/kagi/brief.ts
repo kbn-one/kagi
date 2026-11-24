@@ -71,7 +71,7 @@ export function agentBrief({ base, secrets }: BriefOptions): string {
     "  git config --global credential.https://github.com.useHttpPath true",
     `  git config --global credential.https://github.com.helper '!KAGI_URL=${base} ${
       app === "GH_APP" ? "" : `KAGI_APP=${app} `
-    }deno run --allow-net=${host} --allow-env https://raw.githubusercontent.com/kbn-one/kagi/main/tools/git_credential_kagi.ts'`,
+    }deno run --allow-net=${host} --allow-env=KAGI_URL,KAGI_APP,KAGI_PERMISSIONS https://raw.githubusercontent.com/kbn-one/kagi/main/tools/git_credential_kagi.ts'`,
   );
   return lines.join("\n");
 }

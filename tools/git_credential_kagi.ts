@@ -22,6 +22,10 @@
  * Environment: `KAGI_URL` (required), `KAGI_APP` (vault name of the App, default `GH_APP`),
  * `KAGI_PERMISSIONS` (default `contents:write`, comma-separated `name:read|write`).
  *
+ * Every answer comes sealed for a key pair the helper makes for that one request (`seal`), so the
+ * kagi server carries the token only as ciphertext. `openSealedResult` below must match
+ * `web/client/lib/kagi/result_seal.ts` (the tests open what that seals).
+ *
  * Self-contained on purpose — no imports — so it runs from a URL without the rest of the repo.
  */
 
@@ -107,6 +111,71 @@ export async function run(
   return `username=x-access-token\npassword=${token}\n`;
 }
 
+const b64 = (bytes: Uint8Array) =>
+  bytes.toBase64({ alphabet: "base64url", omitPadding: true });
+const unb64 = (text: string) =>
+  Uint8Array.fromBase64(text, { alphabet: "base64url" }) as Uint8Array<
+    ArrayBuffer
+  >;
+
+/** A sealed result as kagi hands it over: the phone's one-off key, the IV and the ciphertext. */
+export interface SealedBox {
+  publicKey: string;
+  iv: string;
+  data: string;
+}
+
+/**
+ * Opens a result the phone sealed for `requesterKey` (ECDH P-256 → HKDF-SHA-256 with info
+ * `kagi-result-v1:<requester key>:<phone key>` → AES-256-GCM, the transaction as associated data).
+ */
+export async function openSealedResult(
+  sealed: SealedBox,
+  privateKey: CryptoKey,
+  requesterKey: string,
+  txId: string,
+): Promise<{ status: number; body: string }> {
+  const peer = await crypto.subtle.importKey(
+    "raw",
+    unb64(sealed.publicKey),
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    [],
+  );
+  const shared = await crypto.subtle.deriveBits(
+    { name: "ECDH", public: peer },
+    privateKey,
+    256,
+  );
+  const hkdf = await crypto.subtle.importKey("raw", shared, "HKDF", false, [
+    "deriveKey",
+  ]);
+  const key = await crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new Uint8Array(0),
+      info: new TextEncoder().encode(
+        `kagi-result-v1:${requesterKey}:${sealed.publicKey}`,
+      ),
+    },
+    hkdf,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["decrypt"],
+  );
+  const plain = await crypto.subtle.decrypt(
+    {
+      name: "AES-GCM",
+      iv: unb64(sealed.iv),
+      additionalData: new TextEncoder().encode(`kagi-result:${txId}`),
+    },
+    key,
+    unb64(sealed.data),
+  );
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
 /** Submits a request to kagi and waits for the approver. Returns the call's result. */
 async function askKagi(
   env: HelperEnv,
@@ -118,10 +187,19 @@ async function askKagi(
   const base = env.KAGI_URL?.replace(/\/+$/, "").replace(/\/req$/, "");
   if (!base) throw new Error("KAGI_URL が設定されていません");
 
+  // A key pair for this one answer: only the public half leaves, as `seal`.
+  const pair = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    ["deriveBits"],
+  ) as CryptoKeyPair;
+  const seal = b64(
+    new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey)),
+  );
   const submitted = await fetchImpl(`${base}/req`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(request),
+    body: JSON.stringify({ ...request, seal }),
   });
   if (submitted.status !== 202) {
     throw new Error(`kagi: ${await problemDetail(submitted)}`);
@@ -142,10 +220,17 @@ async function askKagi(
       continue;
     }
     if (!res.ok) throw new Error(`kagi: ${await problemDetail(res)}`);
-    const { response } = await res.json() as {
-      response: { status: number; body: string };
+    const { sealed_response } = await res.json() as {
+      sealed_response?: SealedBox;
     };
-    return response;
+    // Asked for sealed, so nothing else is taken.
+    if (!sealed_response) throw new Error("kagi: 結果が暗号化されていません");
+    return await openSealedResult(
+      sealed_response,
+      pair.privateKey,
+      seal,
+      transaction_id,
+    );
   }
 }
 

@@ -17,11 +17,13 @@ import {
   type ClientMessage,
   FINAL_STATUSES,
   isHttpRequest,
+  isSealedResult,
   type KagiResult,
   parseKagiRequest,
   PENDING_TTL_MS,
   RELAY_HEADERS,
   relayMessage,
+  type SealedResult,
   type ServerMessage,
   type Transaction,
   TX_RETENTION_MS,
@@ -77,7 +79,7 @@ export const MAX_OPEN_TRANSACTIONS = 20;
 export const MAX_REQUEST_BYTES = 64 * 1024;
 
 type Outcome =
-  | { kind: "result"; result: KagiResult }
+  | { kind: "result"; result: KagiResult | SealedResult }
   | { kind: "final"; tx: Transaction };
 
 const REG_KEY = "registration";
@@ -338,11 +340,15 @@ export class Room {
       );
     }
     if (outcome.kind === "final") return finalResponse(outcome.tx);
-    return Response.json({
+    const delivered = {
       transaction_id: txId,
       status: "delivered" satisfies TxStatus,
-      response: outcome.result,
-    });
+    };
+    return Response.json(
+      isSealedResult(outcome.result)
+        ? { ...delivered, sealed_response: outcome.result.sealed }
+        : { ...delivered, response: outcome.result },
+    );
   }
 
   /** Waits for `tx` to finish, asking the phone for the result if it already has it. */
@@ -608,9 +614,22 @@ export class Room {
           return;
         }
         if (tx.status !== "done" && tx.status !== "approved") return;
-        if (!isResult(msg.result)) return;
+        // A requester that sent `seal` gets nothing but a sealed result: one in the clear is a
+        // failure, so the phone's mistake shows instead of passing.
+        const sealed = isSealedResult(msg.result);
+        if (tx.request.seal ? !sealed : !isResult(msg.result)) {
+          tx.status = "failed";
+          tx.error = tx.request.seal
+            ? "The approver's device did not seal the result"
+            : "The approver's device sent no valid result";
+          await this.#save(tx);
+          this.#broadcast({ type: "tx", transaction: tx });
+          this.#settle(tx.id, { kind: "final", tx });
+          return;
+        }
         // Delivered only if someone was there to take it; otherwise the phone keeps it.
-        if (this.#settle(tx.id, { kind: "result", result: msg.result })) {
+        const result = msg.result as KagiResult | SealedResult;
+        if (this.#settle(tx.id, { kind: "result", result })) {
           tx.status = "delivered";
           await this.#save(tx);
           this.#broadcast({ type: "tx", transaction: tx });

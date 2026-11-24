@@ -66,6 +66,7 @@ import {
 } from "../lib/kagi/history.ts";
 import { connect, type KagiConnection } from "../lib/kagi/connection.ts";
 import { sealedCall } from "../lib/kagi/relay_seal.ts";
+import { sealResult } from "../lib/kagi/result_seal.ts";
 import {
   createSubscription,
   forgetSubscription,
@@ -90,6 +91,7 @@ import {
   isHttpRequest,
   isSecretName,
   type KagiRequest,
+  type KagiResult,
   methodOf,
   type Transaction,
   type TxStatus,
@@ -608,13 +610,21 @@ export const KagiApp = clientEntry(
         const vault = await unlockVault();
         const problem = secretsProblem(tx.request, vault.entries);
         if (problem) throw new Error(problem);
+        /** Hands the result over, sealed for the requester when it sent a key (`seal`). */
+        const deliver = async (result: KagiResult) => {
+          const { seal } = tx.request;
+          conn.complete(
+            tx.id,
+            seal ? await sealResult(result, seal, tx.id) : result,
+          );
+        };
 
         if (isAppTokenRequest(tx.request)) {
           const app = vault.entries[tx.request.app] as GithubAppSecret;
           conn.decide(tx.id, true);
           try {
             const result = await mintInstallationToken(tx.request, app);
-            conn.complete(tx.id, result);
+            await deliver(result);
             setStatus(
               "トークンを発行しました（1 時間有効）。リクエスト元が受け取るまでこの画面に保持されます。",
               "success",
@@ -632,7 +642,7 @@ export const KagiApp = clientEntry(
           conn.decide(tx.id, true);
           try {
             const result = await callGithubApi(tx.request, app);
-            conn.complete(tx.id, result);
+            await deliver(result);
             setStatus(
               `GitHub API を呼びました (HTTP ${result.status})。使ったトークンは失効させました。`,
               "success",
@@ -650,7 +660,7 @@ export const KagiApp = clientEntry(
           conn.decide(tx.id, true);
           try {
             const result = await createRepository(tx.request, app);
-            conn.complete(tx.id, result);
+            await deliver(result);
             setStatus(
               `${tx.request.owner}/${tx.request.name} を作成しました。`,
               "success",
@@ -682,7 +692,7 @@ export const KagiApp = clientEntry(
               async (call) => sealedCall(await openRelay(subId!, tx.id), call),
             )
             : await execute(request, secrets);
-          conn.complete(tx.id, result);
+          await deliver(result);
           setStatus(
             `実行しました${
               relayed ? "（kagi のサーバー経由）" : ""
@@ -1073,6 +1083,12 @@ export const KagiApp = clientEntry(
           : isCreateRepoRequest(tx.request)
           ? createRepoDetails(tx.request)
           : httpDetails(tx.request, names)}
+        {tx.request.seal && (
+          <>
+            <dt>結果</dt>
+            <dd>リクエスト元の鍵で暗号化して返す（サーバーは読めない）</dd>
+          </>
+        )}
         <dt>受付</dt>
         <dd>{formatTime(tx.createdAt)}</dd>
         {tx.error && (

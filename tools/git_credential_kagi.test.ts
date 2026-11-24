@@ -4,8 +4,10 @@ import { create, run } from "./git_credential_kagi.ts";
 import {
   challengeMessage,
   type ClientMessage,
+  type KagiRequest,
   type ServerMessage,
 } from "../web/client/lib/kagi/protocol.ts";
+import { sealResult } from "../web/client/lib/kagi/result_seal.ts";
 import { createMemoryHub } from "../web/server/lib/kagi/hub.ts";
 import { parseSubPath, type Upgrade } from "../web/server/lib/kagi/room.ts";
 
@@ -15,6 +17,7 @@ const BASE = `https://kagi.example/api/sub/${SUB}`;
 /** A phone that approves (or rejects) every request, answering with a token. */
 async function setup(approve: boolean) {
   const seen: unknown[] = [];
+  const requests = new Map<string, KagiRequest>();
   let phone!: EventTarget & { send(text: string): void; readyState: number };
   const upgrade: Upgrade = () => {
     const target = new EventTarget() as typeof phone;
@@ -61,18 +64,25 @@ async function setup(approve: boolean) {
         }),
       });
     } else if (m.type === "tx" && m.transaction.status === "pending") {
-      seen.push(m.transaction.request);
+      // Every request carries a fresh key; the rest is what the tests compare.
+      const { seal, ...rest } = m.transaction.request;
+      assert(seal, "the helper asks for a sealed answer");
+      seen.push(rest);
+      requests.set(m.transaction.id, m.transaction.request);
       emit({ type: "decision", txId: m.transaction.id, approved: approve });
       if (approve) emit({ type: "done", txId: m.transaction.id });
     } else if (m.type === "get") {
+      const result = {
+        status: 201,
+        headers: {},
+        body: JSON.stringify({ token: "ghs_one_repo", repositories: [] }),
+      };
+      // As the phone does (`kagi_app.tsx`): sealed for the key the request carries.
+      const seal = requests.get(m.txId)?.seal;
       emit({
         type: "result",
         txId: m.txId,
-        result: {
-          status: 201,
-          headers: {},
-          body: JSON.stringify({ token: "ghs_one_repo", repositories: [] }),
-        },
+        result: seal ? await sealResult(result, seal, m.txId) : result,
       });
     }
   };
@@ -199,4 +209,31 @@ Deno.test("create needs an owner/name and an explicit visibility", async () => {
       "使い方",
     );
   }
+});
+
+Deno.test("an answer that is not sealed is not taken", async () => {
+  // A server answering in the clear, though the helper asked for a sealed result.
+  const fetchImpl = ((input: string | URL | Request) => {
+    const url = String(input instanceof Request ? input.url : input);
+    return Promise.resolve(
+      url.endsWith("/req")
+        ? Response.json({ transaction_id: "t" }, { status: 202 })
+        : Response.json({
+          status: "delivered",
+          response: { status: 201, body: '{"token":"ghs_in_the_clear"}' },
+        }),
+    );
+  }) as typeof fetch;
+  await assertRejects(
+    () =>
+      run(
+        "get",
+        gitInput("kbn-one/kagi.git"),
+        { KAGI_URL: BASE },
+        () => {},
+        fetchImpl,
+      ),
+    Error,
+    "暗号化されていません",
+  );
 });

@@ -45,6 +45,7 @@ export function agentBrief({ base, secrets }: BriefOptions): string {
     `   Create a GitHub repo: {"type":"github-create-repo","app":"${app}","owner":"OWNER","name":"REPO","visibility":"private"}`,
     "2. GET <endpoint>/res?transaction_id=…&wait=55 — repeat while it answers 202.",
     '   200 {"response":{"status","headers","body"}}: given once only; secret values in it read [NAME].',
+    '   Optional "seal": your P-256 public key (raw, base64url) in any request → 200 {"sealed_response":{…}} instead, readable only by you (see openSealedResult in the git helper).',
     '   403 rejected · 502 the call failed · 410 expired or already given. Errors are application/problem+json; read "detail".',
     "   Do not resend a rejected request without asking the human.",
   ];

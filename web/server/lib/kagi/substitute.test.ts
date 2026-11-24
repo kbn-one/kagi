@@ -1,4 +1,9 @@
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 
 import type { RelayCall } from "../../../client/lib/kagi/protocol.ts";
 import {
@@ -8,6 +13,7 @@ import {
   scrub,
   secretsProblem,
   summarizeSecret,
+  textSecretFrom,
   usesRelay,
 } from "../../../client/lib/kagi/substitute.ts";
 
@@ -146,5 +152,39 @@ Deno.test("executeRelayed sends the filled call and scrubs the answer", async ()
       ),
     Error,
     "leaked [KEY]",
+  );
+});
+
+Deno.test("textSecretFrom: editing keeps the saved value when the field is left empty", () => {
+  const saved = { value: "old", hosts: ["a.example"] };
+  assertEquals(
+    textSecretFrom({ value: "", hosts: ["b.example"], relay: true }, saved),
+    { value: "old", hosts: ["b.example"], relay: true },
+  );
+  assertEquals(
+    textSecretFrom({ value: "new", hosts: [], relay: false }, saved),
+    { value: "new", hosts: [] },
+  );
+  // Adding needs a value; an App's key is never carried over into a text secret.
+  assertThrows(
+    () => textSecretFrom({ value: "", hosts: [], relay: false }),
+    Error,
+    "値",
+  );
+  assertThrows(
+    () =>
+      textSecretFrom({ value: "", hosts: [], relay: false }, {
+        kind: "github-app",
+        appId: "1",
+        value: "PEM",
+        hosts: [],
+      }),
+    Error,
+    "値",
+  );
+  assertThrows(
+    () => textSecretFrom({ value: "v", hosts: [], relay: true }),
+    Error,
+    "ホスト",
   );
 });

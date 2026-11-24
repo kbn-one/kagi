@@ -45,10 +45,11 @@ CORS を許可していない API には、秘密を登録するときに「kagi
 
 1. スマホが端末鍵の署名付きで `GET /api/sub/:id/relay`（WebSocket）を開く。 Room
    は署名と「1 トランザクション 1 回」を確かめ、承認したリクエストの URL
-   のホストを返す。
+   のホストを返す。IP アドレス・localhost・kagi 自身のドメインは断る。
 2. Worker は Worker Loader で、その 1 回のためだけの Dynamic Worker を作って
    WebSocket を渡す（バインディング無し・subrequest 1
-   回・そのホスト以外には送らない・ redirect は追わずそのまま返す）。
+   回・そのホスト以外には送らない・ redirect は追わずそのまま返す・応答は 512
+   KiB まで）。中継と登録は Worker が接続元アドレスごとに回数を制限する。
 3. Dynamic Worker が ECDH の鍵を作って公開鍵を送り、スマホも鍵を作って共通鍵を
    導く（HKDF → AES-GCM）。スマホは `[NAME]` を埋めた呼び出しを暗号化して送り、
    Dynamic Worker が開いて呼び、応答を暗号化して返す。秘密の除去はスマホが行う。

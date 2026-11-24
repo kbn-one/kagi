@@ -67,6 +67,17 @@ export default defineConfig({
       // Makes the single-use Dynamic Worker that each relayed call runs in
       // (`web/server/lib/kagi/relay.ts`), for APIs that do not allow CORS.
       LOADER: bindings.workerLoader(),
+      // Per client address (`web/server/lib/kagi/rate_limit.ts`): relayed calls and registrations,
+      // the two calls that cost this server something for anyone at all. The namespaces are this
+      // account's own numbers; another Worker using the same one would share the count.
+      RELAY_LIMIT: bindings.rateLimit({
+        namespace: "91701",
+        simple: { limit: 20, period: 60 },
+      }),
+      REGISTER_LIMIT: bindings.rateLimit({
+        namespace: "91702",
+        simple: { limit: 5, period: 60 },
+      }),
       // Secret, generated and set by `web/server/set_vapid_keys.ts` (by the deploy when missing, and
       // by the `vapid-keys` workflow to rotate); declared here so a deploy keeps it.
       VAPID_KEYS: hasVapidKeys ? bindings.secret() : null,

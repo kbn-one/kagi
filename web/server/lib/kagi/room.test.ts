@@ -621,6 +621,40 @@ Deno.test("relay: only an open http request", async () => {
   );
 });
 
+Deno.test("relay: refused to an IP address or this server's own domain, without using it up", async () => {
+  const { hub, sign } = await setup();
+  const authorizeOn = async (url: string) => {
+    const { transaction_id: txId } = await (await submit(hub, {
+      ...ghRequest,
+      url,
+    })).json();
+    const signature = await sign(relayMessage(SUB, txId));
+    return await hub.dispatch(
+      SUB,
+      "relay",
+      new Request(`https://kagi.kbn.one/api/sub/${SUB}/relay`, {
+        method: "POST",
+        headers: {
+          [RELAY_HEADERS.transaction]: txId,
+          [RELAY_HEADERS.signature]: signature,
+        },
+      }),
+    );
+  };
+  for (
+    const url of [
+      "https://169.254.169.254/latest",
+      "https://localhost:8443/",
+      "https://other.kbn.one/admin",
+    ]
+  ) {
+    const res = await authorizeOn(url);
+    assertEquals(res.status, 403, url);
+    assertEquals(res.headers.get("content-type"), "application/problem+json");
+  }
+  assertEquals((await authorizeOn("https://api.github.com/user")).status, 200);
+});
+
 Deno.test("parseSubPath reads relay", () => {
   assertEquals(parseSubPath(`/api/sub/${SUB}/relay`, "POST"), {
     subId: SUB,

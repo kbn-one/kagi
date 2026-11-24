@@ -141,7 +141,8 @@ export default function Docs(_handle: Handle) {
           が代わりに行う。スマホとその Worker
           のあいだで鍵を決めて暗号化するので、kagi
           のサーバー本体が運ぶのは暗号文だけ。redirect は追わず、3xx
-          をそのまま返す。リクエスト元から見た使い方は変わらない。
+          をそのまま返す。応答は 512 KiB まで。IP アドレス・localhost・kagi
+          自身のドメイン（kbn.one）へは中継しない。リクエスト元から見た使い方は変わらない。
         </p>
       </section>
 

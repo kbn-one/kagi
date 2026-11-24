@@ -32,6 +32,7 @@ import type { PushSubscriptionData } from "@remix-kbn/web-push/server";
 
 import { problem } from "../problem.ts";
 import type { ApprovalPush } from "./notify.ts";
+import { relayTargetProblem } from "./relay_target.ts";
 
 /** The subset of Durable Object storage (`ctx.storage`) the room uses. */
 export interface RoomStorage {
@@ -334,7 +335,8 @@ export class Room {
 
   /**
    * Whether the approver may have the server make the call of a transaction (`relay.ts`): signed by
-   * the device key, and once per transaction. Answers `{ host }`, the only host the call may go to.
+   * the device key, once per transaction, and to a host the relay may call (`relay_target.ts`).
+   * Answers `{ host }`, the only host the call may go to.
    *
    * A `pending` transaction is accepted too: the phone sends its `decision` over the WebSocket and
    * this right after, so this can arrive first, and the signature is the approver's say-so anyway.
@@ -389,6 +391,9 @@ export class Room {
       } catch {
         return problem({ status: 400, detail: "The request has no valid url" });
       }
+      // Checked before the one relay is used up, so the phone can still make the call itself.
+      const refused = relayTargetProblem(host, new URL(request.url).hostname);
+      if (refused) return problem({ status: 403, detail: refused });
       tx.relayed = true;
       await this.#save(tx);
       return Response.json({ host }, {

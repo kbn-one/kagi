@@ -65,12 +65,17 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
 - CORS 非対応の API は中継（`web/server/lib/kagi/relay.ts`）。vault の
   `relay: true` の秘密を使う `http` リクエストだけ、スマホが端末鍵で
   `relayMessage(subId, txId)` に署名して `GET /api/sub/:id/relay`（WebSocket、
-  署名は query）を開く。Room は署名と「1 tx 1 回」だけを見て `{ host }` （tx の
-  URL のホスト）を返す。Worker は `LOADER`（Worker Loader、
-  `cloudflare.config.ts`）の `load()` で呼び出し毎に使い捨ての Dynamic Worker
+  署名は query）を開く。Room は署名・「1 tx 1 回」・宛先（`relay_target.ts`: IP
+  アドレス・localhost・自分のゾーンは不可）を見て `{ host }` （tx の URL
+  のホスト）を返す。誰でも登録して中継を使えるので、Worker が中継と登録を
+  接続元アドレスごとに制限する（`rate_limit.ts`、`cloudflare.config.ts` の Rate
+  Limiting バインディング `RELAY_LIMIT`・`REGISTER_LIMIT`）。Worker は
+  `LOADER`（Worker Loader、 `cloudflare.config.ts`）の `load()`
+  で呼び出し毎に使い捨ての Dynamic Worker
   （`RELAY_MODULE`、バインディング無し・subrequest 1・`env.HOST` 以外は拒否・
-  redirect は manual）を作り、upgrade をそのまま渡す。Dynamic Worker と
-  スマホ（`lib/kagi/relay_seal.ts`）が ECDH P-256 → HKDF → AES-GCM で鍵を決め、
+  redirect は manual・応答は 512 KiB まで）を作り、upgrade
+  をそのまま渡す。Dynamic Worker と スマホ（`lib/kagi/relay_seal.ts`）が ECDH
+  P-256 → HKDF → AES-GCM で鍵を決め、
   呼び出し（`RelayCall`）と応答を暗号化してやり取りする（`RelayFrame`）ので、
   本体 Worker・DO が運ぶのは暗号文だけ。モジュールとクライアントの鍵導出は
   揃えておく（`relay.test.ts` が突き合わせる）。Deno では同じモジュールを

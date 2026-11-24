@@ -19,7 +19,10 @@ export type Secrets = Record<string, string>;
 /** A secret as the vault stores it. */
 export type SecretEntry = TextSecret | GithubAppSecret;
 
-/** A value for `[NAME]` placeholders. `hosts` limits where it may be sent; empty means anywhere. */
+/**
+ * A value for `[NAME]` placeholders. `hosts` lists where it may be sent; one saved before hosts were
+ * required may have none, and is then sent nowhere.
+ */
 export interface TextSecret {
   kind?: "text";
   value: string;
@@ -84,12 +87,12 @@ export function textSecretFrom(
   const value = form.value ||
     (saved && !isAppSecret(saved) ? saved.value : "");
   if (!value) throw new Error("値を入力してください。");
-  if (form.relay && !form.hosts.length) {
-    throw new Error(
-      "サーバー経由で送る秘密には、送信を許すホストを指定してください。",
-    );
+  // Compared with a URL's `host`, which is lowercase.
+  const hosts = form.hosts.map((h) => h.toLowerCase());
+  if (!hosts.length) {
+    throw new Error("送信を許すホストを指定してください。");
   }
-  return { value, hosts: form.hosts, ...(form.relay ? { relay: true } : {}) };
+  return { value, hosts, ...(form.relay ? { relay: true } : {}) };
 }
 
 /** Whether a request's call goes through the server: when any secret it uses says so. */
@@ -146,7 +149,11 @@ export function secretsProblem(
     if (isAppSecret(entry)) {
       return `${name} は GitHub App の鍵なので、リクエストには埋め込めません`;
     }
-    if (entry.hosts.length && !entry.hosts.includes(host)) {
+    // A secret with no hosts (saved before they were required) goes nowhere until it has some.
+    if (!entry.hosts.length) {
+      return `秘密 ${name} は送信先ホストが未設定です。金庫の「編集」で設定してください`;
+    }
+    if (!entry.hosts.includes(host)) {
       return `秘密 ${name} は ${host} への送信が許可されていません`;
     }
   }

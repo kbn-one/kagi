@@ -29,8 +29,9 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   保存済みのまま（`textSecretFrom`）。「追加」は既存の名前を拒む）、`device.ts`（subscription
   と IndexedDB の非 extractable ECDSA
   端末鍵）、`connection.ts`（WebSocket。結果はメモリにだけ保持）、
-  `substitute.ts`（`[NAME]` の置換、送信先ホスト制限、結果からの秘密の除去）、
-  `brief.ts`（AI エージェントに渡す説明。URL 入り、秘密は名前だけ。設定タブの
+  `substitute.ts`（`[NAME]` の置換、送信先ホスト制限（必須。未設定の古い秘密は
+  使えない）、結果からの秘密の除去）、 `brief.ts`（AI
+  エージェントに渡す説明。URL 入り、秘密は名前だけ。設定タブの
   「リクエスト元の設定」からコピー）、 画面は
   `islands/kagi_app.tsx`（`/kagi`）。準備が済んだら `jsr:@remix-kbn/apple-ui` の
   `TabView` で 承認（`#approve`、既定）・金庫（`#vault`）・設定
@@ -56,7 +57,9 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   - `github-api`: 同じように絞ったトークンをスマホが発行して `api.github.com` +
     `path` を 1 回呼び、直後に revoke する。トークンは
     スマホの外に出ず、応答（トークンは `[APP]` に置換）だけを返す。
-    `/repos/OWNER/REPO/…` の path は `owner`・`repositories` の中に限る。
+    `/repos/OWNER/REPO/…` の path は `owner`・`repositories` の中に限る（path の
+    `%2e`・`%2f`・`%5c` は不可）。`permissions` はリポジトリの権限だけ
+    （`protocol.ts` の `REPOSITORY_PERMISSIONS`）。
   - `github-create-repo`: スマホが App でリポジトリを作り（作成用トークンは
     スマホ内で使い捨て、直後に revoke）、名前と URL だけを返す。公開範囲は
     必須。CLI は

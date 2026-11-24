@@ -30,6 +30,7 @@ import type { FileServerBehavior } from "@remix-kbn/ssg/site";
 
 import { assets, assetsPath } from "./assets.ts";
 import { contentSecurityPolicy, nonceOf } from "./csp.ts";
+import { securityHeaders } from "./security_headers.ts";
 import { clientRuntime } from "./runtime.ts";
 import { ogImage, ogPaths, serveOgImage } from "./og/mod.ts";
 import { ICONS, manifest, serveIcon } from "./icon.ts";
@@ -97,6 +98,7 @@ const serviceWorker = pushServiceWorkerScript({ defaultTitle: "kagi" });
  */
 const router = createRouter({
   middleware: [
+    securityHeaders,
     cop({ onDeny: copDenied }),
     contentSecurityPolicy,
     render({ assets }),

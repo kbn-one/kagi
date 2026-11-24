@@ -21,6 +21,7 @@ import {
   loadAndParseConfig,
   loadAndParseConfigSettings,
 } from "@cloudflare/config";
+import { headersFile } from "./security_headers.ts";
 
 const root = decodeURIComponent(new URL("../../", import.meta.url).pathname);
 const worker = `${root}web/worker-dist/worker.js`;
@@ -36,6 +37,9 @@ const { result: settings } = await loadAndParseConfigSettings(configPath, ctx);
 if (!settings.success) {
   throw new Error(`cloudflare.config.ts: ${settings.error}`);
 }
+
+// The security headers for the static assets, which Cloudflare serves without the Worker.
+await Deno.writeTextFile(`${root}web/dist/_headers`, headersFile());
 
 await cleanBuildOutputDir(root);
 await writeRootConfig({ root, settings: settings.data, buildContext: ctx });

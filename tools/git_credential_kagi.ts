@@ -11,12 +11,12 @@
  *
  *   git config credential.https://github.com.useHttpPath true
  *   git config credential.https://github.com.helper \
- *     '!KAGI_URL=https://kagi.kbn.one/api/sub/<id> deno run --allow-net=kagi.kbn.one --allow-env \
+ *     '!KAGI_URL=https://kagi.kbn.one/api/sub/<id> deno run --allow-net=kagi.kbn.one --allow-env=KAGI_URL,KAGI_APP,KAGI_PERMISSIONS \
  *       https://raw.githubusercontent.com/kbn-one/kagi/main/tools/git_credential_kagi.ts'
  *
  * It also creates repositories, as its own command (the approver sees the name and visibility):
  *
- *   KAGI_URL=… deno run --allow-net=kagi.kbn.one --allow-env …/git_credential_kagi.ts \
+ *   KAGI_URL=… deno run --allow-net=kagi.kbn.one --allow-env=KAGI_URL,KAGI_APP,KAGI_PERMISSIONS …/git_credential_kagi.ts \
  *     create kbn-one/new-repo --public [--description "…"] [--init]
  *
  * Environment: `KAGI_URL` (required), `KAGI_APP` (vault name of the App, default `GH_APP`),

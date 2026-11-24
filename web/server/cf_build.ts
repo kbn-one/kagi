@@ -1,5 +1,5 @@
 /**
- * Writes the Cloudflare Build Output Specification (`.cloudflare/output/v0`) for `cf deploy
+ * Writes the Cloudflare Build Output Specification (`.cloudflare/output/v1`) for `cf deploy
  * --prebuilt`.
  *
  * `cf build` delegates to Wrangler or the Vite plugin, neither of which resolves this repo's `jsr:`
@@ -38,7 +38,7 @@ if (!settings.success) {
 }
 
 await cleanBuildOutputDir(root);
-await writeRootConfig(root, settings.data, ctx);
+await writeRootConfig({ root, settings: settings.data, buildContext: ctx });
 await writeAssets({ root, sourceDirectory: `${root}web/dist` });
 
 const bundleDir = getWorkerBundleDir(root);
@@ -53,4 +53,4 @@ await writeWorkerConfig({
     modules: { "worker.js": { type: "esm" } },
   },
 });
-console.log("Wrote .cloudflare/output/v0");
+console.log("Wrote .cloudflare/output/v1");

@@ -25,6 +25,7 @@ import {
   setRelayRunner,
   type WorkerLoaderLike,
 } from "./lib/kagi/relay.ts";
+import { rateLimited, type RateLimiters } from "./lib/kagi/rate_limit.ts";
 import { copDenied, problem } from "./lib/problem.ts";
 import { type AssetsLike, createPagesRouter } from "./pages.ts";
 
@@ -43,11 +44,16 @@ const router = createRouter({
 
 router.map(routes.api.sub, subController as never);
 
-interface WorkerEnv {
+interface WorkerEnv extends RateLimiters {
   KAGI_ROOM?: DurableObjectNamespaceLike;
   ASSETS?: AssetsLike;
   /** The Worker Loader, which makes the single-use Dynamic Worker of each relayed call. */
   LOADER?: WorkerLoaderLike;
+}
+
+/** The API, behind the per-address limits (`lib/kagi/rate_limit.ts`). */
+async function api(request: Request, env: RateLimiters): Promise<Response> {
+  return (await rateLimited(request, env)) ?? router.fetch(request);
 }
 
 let boundDurableObjects = false;
@@ -68,7 +74,7 @@ export default {
       boundLoader = env.LOADER;
     }
     if (new URL(request.url).pathname.startsWith("/api/")) {
-      return router.fetch(request);
+      return api(request, env ?? {});
     }
     // Everything else that reaches the Worker is a page (`runWorkerFirst`): see `pages.ts`.
     if (!pages || pagesAssets !== env?.ASSETS) {

@@ -233,3 +233,71 @@ Deno.test("worker refuses a relay without the device key's signature", async () 
   assertEquals(res.status >= 400, true);
   await res.body?.cancel();
 });
+
+Deno.test("worker limits relays and registrations per client address", async () => {
+  const keys: { name: string; key: string }[] = [];
+  const limiter = (name: string, allow: boolean) => ({
+    limit: ({ key }: { key: string }) => {
+      keys.push({ name, key });
+      return Promise.resolve({ success: allow });
+    },
+  });
+  const env = {
+    RELAY_LIMIT: limiter("relay", false),
+    REGISTER_LIMIT: limiter("register", false),
+  };
+  const headers = { "cf-connecting-ip": "203.0.113.7" };
+
+  const register = await worker.fetch(
+    new Request("http://x/api/sub/limitlimitlimitlimit01", {
+      method: "PUT",
+      headers,
+      body: "{}",
+    }),
+    env,
+  );
+  const body = await assertProblem(register, 429);
+  assertEquals(register.headers.get("retry-after"), "60");
+  assertStringIncludes(String(body.detail), "Too many requests");
+
+  const relay = await worker.fetch(
+    new Request(
+      "http://x/api/sub/limitlimitlimitlimit01/relay?transaction_id=t&signature=s",
+      { headers: { ...headers, upgrade: "websocket" } },
+    ),
+    env,
+  );
+  await assertProblem(relay, 429);
+
+  // A requester's calls are not limited here.
+  const submitted = await worker.fetch(
+    new Request("http://x/api/sub/limitlimitlimitlimit01/req", {
+      method: "POST",
+      headers,
+      body: "{}",
+    }),
+    env,
+  );
+  assertEquals(submitted.status, 404);
+  await submitted.body?.cancel();
+
+  assertEquals(keys, [
+    { name: "register", key: "203.0.113.7" },
+    { name: "relay", key: "203.0.113.7" },
+  ]);
+});
+
+Deno.test("worker lets a registration under the limit through", async () => {
+  const env = {
+    REGISTER_LIMIT: { limit: () => Promise.resolve({ success: true }) },
+  };
+  const res = await worker.fetch(
+    new Request("http://x/api/sub/limitlimitlimitlimit02", {
+      method: "PUT",
+      body: "{}",
+    }),
+    env,
+  );
+  // Through to the room, which refuses the empty body.
+  await assertProblem(res, 400);
+});

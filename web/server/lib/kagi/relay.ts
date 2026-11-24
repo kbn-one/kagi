@@ -10,7 +10,11 @@
  *    in the query. The room checks it and lets each transaction be relayed once
  *    (`Room#authorizeRelay`), and answers the host of that transaction's URL.
  * 2. The main Worker hands the upgrade to a fresh Dynamic Worker ({@link RELAY_MODULE}) that knows
- *    only that host: no bindings, one subrequest.
+ *    only that host: no bindings, one subrequest, an answer of at most 512 KiB.
+ *
+ * Anyone can register a phone and so relay calls of their own, which is why the host may not be an
+ * IP address, `localhost` or this server's own domain (`relay_target.ts`), and why the Worker limits
+ * relays and registrations per address (`rate_limit.ts`).
  * 3. It makes an ECDH (P-256) key pair and sends the public half (`key`). The phone makes its own,
  *    and both derive the same AES-GCM key (HKDF-SHA-256 over the two public keys).
  * 4. The phone sends the call, with its placeholders filled, sealed with that key (`call`). The
@@ -39,6 +43,8 @@ import { kagiHub } from "./hub.ts";
  */
 export const RELAY_MODULE = String.raw`
 const MAX_CALL_BYTES = 256 * 1024;
+/** The most of an answer handed back: more than an API answer needs, less than a WebSocket carries. */
+const MAX_ANSWER_BYTES = 512 * 1024;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const b64 = (bytes) => bytes.toBase64({ alphabet: "base64url", omitPadding: true });
@@ -102,7 +108,36 @@ async function makeCall(call, host) {
   }
   const headers = {};
   res.headers.forEach((v, k) => { headers[k] = v; });
-  return { ok: true, status: res.status, headers, body: await res.text() };
+  const body = await readCapped(res);
+  if (body === null) {
+    return { ok: false, detail: "The answer is larger than " + MAX_ANSWER_BYTES + " bytes" };
+  }
+  return { ok: true, status: res.status, headers, body };
+}
+
+/** The body as text, or null past MAX_ANSWER_BYTES (and the rest is not read). */
+async function readCapped(res) {
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_ANSWER_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const c of chunks) {
+    bytes.set(c, offset);
+    offset += c.byteLength;
+  }
+  return decoder.decode(bytes);
 }
 
 /** One relay over an accepted socket: key, call, result, close. */

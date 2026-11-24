@@ -158,6 +158,25 @@ Deno.test("relay: another host is refused, and the refusal is sealed too", async
   });
 });
 
+Deno.test("relay: an answer past 512 KiB is refused, not carried", async () => {
+  await withUpstream(
+    () => new Response("x".repeat(512 * 1024 + 1)),
+    async (seen) => {
+      const { result } = await relayOnce(call);
+      await assertRejects(() => result, Error, "larger than");
+      assertEquals(seen.length, 1);
+    },
+  );
+  // Exactly the limit still goes through.
+  await withUpstream(
+    () => new Response("x".repeat(512 * 1024)),
+    async () => {
+      const { result } = await relayOnce(call);
+      assertEquals((await result).body.length, 512 * 1024);
+    },
+  );
+});
+
 Deno.test("relay: only https", async () => {
   const { result } = await relayOnce({
     ...call,

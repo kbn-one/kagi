@@ -1404,7 +1404,7 @@ export const KagiApp = clientEntry(
             ]}
           />
           <input
-            placeholder="送信を許すホスト (例: api.github.com、空なら制限なし)"
+            placeholder="送信を許すホスト (例: api.github.com、必須)"
             aria-label="送信を許すホスト"
             autocomplete="off"
             autocapitalize="none"
@@ -1830,7 +1830,7 @@ function describeSecret(entry: SecretSummary): string {
   const via = entry.relay ? "（kagi のサーバー経由）" : "";
   return entry.hosts.length
     ? ` → ${entry.hosts.join(", ")} のみ${via}`
-    : ` → 送信先の制限なし${via}`;
+    : " → 送信先ホスト未設定（「編集」で設定するまで使えません）";
 }
 
 /** The repositories and permissions a token is limited to. */

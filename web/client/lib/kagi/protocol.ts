@@ -334,14 +334,16 @@ export function parseKagiRequest(value: unknown): KagiRequest | string {
   } catch {
     return "url must be an absolute URL";
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    return "url must be http(s)";
-  }
+  // A secret sent over plain http could be read by anyone on the way.
+  if (url.protocol !== "https:") return "url must be https";
   // The host is what the approver judges the request by, so it may not hide behind a secret.
   const authority = v.url.match(/^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i)?.[1];
   if (authority === undefined || placeholdersIn(authority).size) {
     return "url host must not contain placeholders";
   }
+  // `https://api.github.com@evil.example/` goes to evil.example: no user part, so the host the
+  // approver reads at the start is the one called.
+  if (authority.includes("@")) return "url must not contain a user part (@)";
 
   if (v.method !== undefined) {
     if (
@@ -391,7 +393,43 @@ export function parseKagiRequest(value: unknown): KagiRequest | string {
 
 const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const GITHUB_REPO = /^[A-Za-z0-9._-]{1,100}$/;
-const GITHUB_PERMISSION = /^[a-z_]{1,64}$/;
+/**
+ * The repository permissions an installation token can be limited to (GitHub's REST docs, "Create
+ * an installation access token for an app"). Organization and account permissions are left out on
+ * purpose: `repositories` does not narrow them, so a token "for one repository" holding one could
+ * act on the whole organization.
+ */
+export const REPOSITORY_PERMISSIONS: ReadonlySet<string> = new Set([
+  "actions",
+  "administration",
+  "artifact_metadata",
+  "attestations",
+  "checks",
+  "code_quality",
+  "codespaces",
+  "contents",
+  "dependabot_secrets",
+  "deployments",
+  "discussions",
+  "environments",
+  "interaction_limits",
+  "issues",
+  "merge_queues",
+  "metadata",
+  "packages",
+  "pages",
+  "pull_requests",
+  "repository_custom_properties",
+  "repository_hooks",
+  "repository_projects",
+  "secret_scanning_alerts",
+  "secrets",
+  "security_events",
+  "single_file",
+  "statuses",
+  "vulnerability_alerts",
+  "workflows",
+]);
 /** More than this is not "the repository this task is about". */
 export const MAX_TOKEN_REPOSITORIES = 10;
 
@@ -432,8 +470,10 @@ function parseTokenScope(v: Record<string, unknown>): TokenScope | string {
   }
   const permissions: Record<string, "read" | "write"> = {};
   for (const [name, level] of Object.entries(v.permissions)) {
-    if (!GITHUB_PERMISSION.test(name)) {
-      return `Invalid permission name: ${JSON.stringify(name)}`;
+    if (!REPOSITORY_PERMISSIONS.has(name)) {
+      return `Not a repository permission: ${
+        JSON.stringify(name)
+      } (organization and account permissions are not limited to the repositories)`;
     }
     if (level !== "read" && level !== "write") {
       return `Permission ${name} must be "read" or "write"`;
@@ -476,11 +516,17 @@ function parseGithubApiRequest(
   }
   const url = new URL(path, GITHUB_API);
   const segments = url.pathname.split("/");
+  const pathname = path.split("?")[0];
   if (
     url.origin !== GITHUB_API ||
-    path.split("?")[0].split("/").some((s) => s === "." || s === "..")
+    pathname.split("/").some((s) => s === "." || s === "..")
   ) {
     return "path must stay on api.github.com";
+  }
+  // `%2e%2e` is resolved as `..` when the call is made, so the path the approver reads would not be
+  // the one called; an encoded `/` or `\` would split a segment the same way.
+  if (/%2e|%2f|%5c/i.test(pathname)) {
+    return "path must not encode . / or \\";
   }
   // A path into one repository must be one the token is limited to, so what the approver reads
   // as "owner/repo" is where the call goes. (The token would refuse anything else anyway.)

@@ -3,6 +3,15 @@ name: cloudflare
 on:
   push:
     branches: [main]
+  # By hand (Actions → cloudflare → Run workflow), to deploy main again. With `force`, the deploy
+  # overwrites a Worker configuration last changed in the Cloudflare dashboard, which `cf deploy`
+  # otherwise refuses to do; pushes never force.
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Overwrite a configuration changed in the dashboard
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,7 +40,7 @@ jobs:
       # Static site + Worker bundle,
       # arranged as the Build Output Specification for `cf deploy --prebuilt`.
       - run: deno task build:cf
-      - run: deno task cf deploy --prebuilt
+      - run: deno task cf deploy --prebuilt ${{ inputs.force && '--force' || '' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       # The Worker has no key yet (first deploy): it exists now, so give it one.

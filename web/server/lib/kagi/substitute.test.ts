@@ -5,7 +5,10 @@ import {
   assertThrows,
 } from "@std/assert";
 
-import type { RelayCall } from "../../../client/lib/kagi/protocol.ts";
+import {
+  parseKagiRequest,
+  type RelayCall,
+} from "../../../client/lib/kagi/protocol.ts";
 import {
   buildFetch,
   execute,
@@ -187,4 +190,57 @@ Deno.test("textSecretFrom: editing keeps the saved value when the field is left 
     Error,
     "ホスト",
   );
+});
+
+Deno.test("execute scrubs the secret out of a failure, which goes to the requester", async () => {
+  // WebKit and Gecko quote a refused header value, filled in, in their TypeError.
+  const quoting: typeof fetch = (_url, init) => {
+    const auth = (init?.headers as Headers).get("authorization");
+    return Promise.reject(
+      new TypeError(`Header 'authorization' has invalid value: '${auth}'`),
+    );
+  };
+  const error = await assertRejects(
+    () => execute(req, { GH_SECRET: "ghp_x" }, quoting),
+    Error,
+  );
+  assertEquals(
+    error.message,
+    "Header 'authorization' has invalid value: 'Bearer [GH_SECRET]'",
+  );
+});
+
+Deno.test("buildFetch reports a refused header by name, never its filled value", () => {
+  // A secret value with a newline in it: the browser refuses the header.
+  const error = assertThrows(
+    () => buildFetch(req, { GH_SECRET: "ghp_x\nInjected: 1" }),
+    Error,
+  );
+  assertEquals(
+    error.message,
+    "ヘッダー authorization に送れない文字が入っています",
+  );
+});
+
+Deno.test("parseKagiRequest refuses headers the browser could not send", () => {
+  const base = { secrets: ["T"], url: "https://api.example.com/x" };
+  for (
+    const headers of [
+      { authorization: "Bearer [T]\u0000" },
+      { authorization: "Bearer [T]\r\nx-injected: 1" },
+      { authorization: "Bearer [T]\u3042" },
+      { "x\u0000y": "[T]" },
+      { "x y": "[T]" },
+      { "": "[T]" },
+    ]
+  ) {
+    const parsed = parseKagiRequest({ ...base, headers });
+    assertEquals(typeof parsed, "string", JSON.stringify(headers));
+  }
+  // Placeholders, tabs and Latin-1 are fine, in names as in values.
+  const ok = parseKagiRequest({
+    ...base,
+    headers: { authorization: "Bearer\t[T] \u00e9", "x-[T]": "1" },
+  });
+  assertEquals(typeof ok, "object");
 });

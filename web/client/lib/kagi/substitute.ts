@@ -162,14 +162,23 @@ export function secretsProblem(
   return null;
 }
 
-/** The `fetch()` arguments for a request with its placeholders filled. */
+/**
+ * The `fetch()` arguments for a request with its placeholders filled.
+ *
+ * A header the browser refuses is reported by its name as the request wrote it: some engines
+ * (WebKit, Gecko) put the refused value, secret and all, in their error message.
+ */
 export function buildFetch(
   req: HttpRequest,
   secrets: Secrets,
 ): { url: string; init: RequestInit } {
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers ?? {})) {
-    headers.set(fill(k, secrets), fill(v, secrets));
+    try {
+      headers.set(fill(k, secrets), fill(v, secrets));
+    } catch {
+      throw new Error(`ヘッダー ${k} に送れない文字が入っています`);
+    }
   }
   let body: string | undefined;
   if (req.body !== undefined) {
@@ -199,23 +208,32 @@ export function scrub(text: string, secrets: Secrets): string {
   return out;
 }
 
-/** Makes the call and returns its answer with every secret scrubbed out of it. */
+/**
+ * Makes the call and returns its answer with every secret scrubbed out of it.
+ *
+ * A failure is scrubbed too: its message goes to the requester (`result` with `error`), and a
+ * browser's message can quote the filled-in URL or header.
+ */
 export async function execute(
   req: HttpRequest,
   secrets: Secrets,
   fetchImpl: typeof fetch = fetch,
 ): Promise<KagiResult> {
-  const { url, init } = buildFetch(req, secrets);
-  const res = await fetchImpl(url, init);
-  const headers: Record<string, string> = {};
-  res.headers.forEach((v, k) => {
-    headers[k] = scrub(v, secrets);
-  });
-  return {
-    status: res.status,
-    headers,
-    body: scrub(await res.text(), secrets),
-  };
+  try {
+    const { url, init } = buildFetch(req, secrets);
+    const res = await fetchImpl(url, init);
+    const headers: Record<string, string> = {};
+    res.headers.forEach((v, k) => {
+      headers[k] = scrub(v, secrets);
+    });
+    return {
+      status: res.status,
+      headers,
+      body: scrub(await res.text(), secrets),
+    };
+  } catch (e) {
+    throw new Error(scrub(e instanceof Error ? e.message : String(e), secrets));
+  }
 }
 
 /** The call a request makes, filled in, as the relay carries it (sealed). */

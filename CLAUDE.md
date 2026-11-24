@@ -24,7 +24,9 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   平文で並べて置く。金庫タブとエージェント向けの説明は閉じたままこれを使う。
   承認時の判定は復号した中身で行い、`names` は表示専用。閉じたままの削除は
   `forgetSecret`: `names` から外して `removed` に積み、
-  以後の解錠では除外し、次の解錠で暗号文から消して封をし直す）、`device.ts`（subscription
+  以後の解錠では除外し、次の解錠で暗号文から消して封をし直す。開いているときは
+  一覧の「編集」で既存の秘密を上書きできる: 名前は固定、値・App の鍵は空なら
+  保存済みのまま（`textSecretFrom`）。「追加」は既存の名前を拒む）、`device.ts`（subscription
   と IndexedDB の非 extractable ECDSA
   端末鍵）、`connection.ts`（WebSocket。結果はメモリにだけ保持）、
   `substitute.ts`（`[NAME]` の置換、送信先ホスト制限、結果からの秘密の除去）、

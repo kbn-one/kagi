@@ -66,6 +66,32 @@ export function summarizeSecret(entry: SecretEntry): SecretSummary {
     : { hosts: [...entry.hosts], ...(entry.relay ? { relay: true } : {}) };
 }
 
+/** What the vault's form holds for a text secret. */
+export interface TextSecretForm {
+  value: string;
+  hosts: string[];
+  relay: boolean;
+}
+
+/**
+ * The text secret to save from the form. When editing (`saved` given), an empty value keeps the
+ * saved one: the value is never shown back, so leaving it out is how only hosts or relay change.
+ */
+export function textSecretFrom(
+  form: TextSecretForm,
+  saved?: SecretEntry,
+): TextSecret {
+  const value = form.value ||
+    (saved && !isAppSecret(saved) ? saved.value : "");
+  if (!value) throw new Error("値を入力してください。");
+  if (form.relay && !form.hosts.length) {
+    throw new Error(
+      "サーバー経由で送る秘密には、送信を許すホストを指定してください。",
+    );
+  }
+  return { value, hosts: form.hosts, ...(form.relay ? { relay: true } : {}) };
+}
+
 /** Whether a request's call goes through the server: when any secret it uses says so. */
 export function usesRelay(
   req: KagiRequest,

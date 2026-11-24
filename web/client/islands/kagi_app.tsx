@@ -99,8 +99,10 @@ import {
   executeRelayed,
   type GithubAppSecret,
   hostOf,
+  isAppSecret,
   secretsProblem,
   type SecretSummary,
+  textSecretFrom,
   usesRelay,
 } from "../lib/kagi/substitute.ts";
 import {
@@ -209,6 +211,13 @@ export const KagiApp = clientEntry(
     let valueInput: HTMLInputElement | null = null;
     let hostsInput: HTMLInputElement | null = null;
     let relayInput: HTMLInputElement | null = null;
+    /**
+     * The secret being edited, when the open vault's form holds one: its name is fixed, and an
+     * empty value (or App key) keeps the one saved.
+     */
+    let editing: { name: string; kind: "text" | "github-app" } | null = null;
+    let secretCard: HTMLElement | null = null;
+    let appCard: HTMLElement | null = null;
     let appNameInput: HTMLInputElement | null = null;
     let appIdInput: HTMLInputElement | null = null;
     let appKeyInput: HTMLTextAreaElement | null = null;
@@ -315,6 +324,7 @@ export const KagiApp = clientEntry(
       });
 
     const onLock = () => {
+      onCancelEdit();
       unlocked = null;
       handle.update();
     };
@@ -322,32 +332,32 @@ export const KagiApp = clientEntry(
     const onAddSecret = () =>
       run(async () => {
         if (!unlocked) return;
-        const name = nameInput?.value.trim() ?? "";
-        const value = valueInput?.value ?? "";
+        const editingText = editing?.kind === "text" ? editing.name : null;
+        const name = editingText ?? nameInput?.value.trim() ?? "";
         const hosts = (hostsInput?.value ?? "").split(/[\s,]+/).filter(Boolean);
         if (!isSecretName(name)) {
           throw new Error(
             "名前は英字・数字・_ で、英字か _ で始めてください。",
           );
         }
-        if (!value) throw new Error("値を入力してください。");
-        const relay = relayInput?.checked ?? false;
-        if (relay && !hosts.length) {
+        if (!editingText && unlocked.entries[name]) {
           throw new Error(
-            "サーバー経由で送る秘密には、送信を許すホストを指定してください。",
+            `${name} はもうあります。変えるときは一覧の「編集」から。`,
           );
         }
-        const entries = {
-          ...unlocked.entries,
-          [name]: { value, hosts, ...(relay ? { relay } : {}) },
-        };
+        const entry = textSecretFrom(
+          {
+            value: valueInput?.value ?? "",
+            hosts,
+            relay: relayInput?.checked ?? false,
+          },
+          editingText ? unlocked.entries[editingText] : undefined,
+        );
+        const entries = { ...unlocked.entries, [name]: entry };
         await unlocked.save(entries);
         unlocked.entries = entries;
         names = vaultNames();
-        if (nameInput) nameInput.value = "";
-        if (valueInput) valueInput.value = "";
-        if (hostsInput) hostsInput.value = "";
-        if (relayInput) relayInput.checked = false;
+        clearSecretForm();
         setStatus(`${name} を保存しました。`, "success");
       });
 
@@ -379,12 +389,21 @@ export const KagiApp = clientEntry(
     const onAddApp = () =>
       run(async () => {
         if (!unlocked) return;
-        const name = appNameInput?.value.trim() ?? "";
+        const editingApp = editing?.kind === "github-app" ? editing.name : null;
+        const name = editingApp ?? appNameInput?.value.trim() ?? "";
         const appId = appIdInput?.value.trim() ?? "";
-        const pem = appKeyInput?.value.trim() ?? "";
+        const saved = editingApp ? unlocked.entries[editingApp] : undefined;
+        // Editing: an empty key keeps the one saved.
+        const pem = appKeyInput?.value.trim() ||
+          (saved && isAppSecret(saved) ? saved.value : "");
         if (!isSecretName(name)) {
           throw new Error(
             "名前は英字・数字・_ で、英字か _ で始めてください。",
+          );
+        }
+        if (!editingApp && unlocked.entries[name]) {
+          throw new Error(
+            `${name} はもうあります。変えるときは一覧の「編集」から。`,
           );
         }
         if (!/^(?:\d+|Iv[0-9A-Za-z.]+)$/.test(appId)) {
@@ -404,14 +423,59 @@ export const KagiApp = clientEntry(
         await unlocked.save(entries);
         unlocked.entries = entries;
         names = vaultNames();
-        if (appNameInput) appNameInput.value = "";
-        if (appIdInput) appIdInput.value = "";
-        if (appKeyInput) appKeyInput.value = "";
+        const keyWasNew = !!appKeyInput?.value.trim();
+        clearAppForm();
         setStatus(
-          `GitHub App ${name} を保存しました。ダウンロードした .pem は削除してください。`,
+          keyWasNew
+            ? `GitHub App ${name} を保存しました。ダウンロードした .pem は削除してください。`
+            : `GitHub App ${name} を保存しました。`,
           "success",
         );
       });
+
+    const clearSecretForm = () => {
+      if (editing?.kind === "text") editing = null;
+      if (nameInput) nameInput.value = "";
+      if (valueInput) valueInput.value = "";
+      if (hostsInput) hostsInput.value = "";
+      if (relayInput) relayInput.checked = false;
+    };
+
+    const clearAppForm = () => {
+      if (editing?.kind === "github-app") editing = null;
+      if (appNameInput) appNameInput.value = "";
+      if (appIdInput) appIdInput.value = "";
+      if (appKeyInput) appKeyInput.value = "";
+    };
+
+    /** Loads a saved secret into its form. The value is not shown: left empty, it stays. */
+    const onEditSecret = (name: string) => {
+      const entry = unlocked?.entries[name];
+      if (!entry) return;
+      clearSecretForm();
+      clearAppForm();
+      if (isAppSecret(entry)) {
+        editing = { name, kind: "github-app" };
+        if (appNameInput) appNameInput.value = name;
+        if (appIdInput) appIdInput.value = entry.appId;
+      } else {
+        editing = { name, kind: "text" };
+        if (nameInput) nameInput.value = name;
+        if (hostsInput) hostsInput.value = entry.hosts.join(" ");
+        if (relayInput) relayInput.checked = !!entry.relay;
+      }
+      handle.update();
+      (isAppSecret(entry) ? appCard : secretCard)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    };
+
+    const onCancelEdit = () => {
+      clearSecretForm();
+      clearAppForm();
+      handle.update();
+    };
 
     const onRemoveSecret = (name: string) =>
       run(async () => {
@@ -420,6 +484,7 @@ export const KagiApp = clientEntry(
           const { [name]: _removed, ...rest } = unlocked.entries;
           await unlocked.save(rest);
           unlocked.entries = rest;
+          if (editing?.name === name) onCancelEdit();
         } else {
           // Closed: off the list and out of every approval now, out of the ciphertext at the next
           // unlock (`vault.ts`).
@@ -1212,18 +1277,33 @@ export const KagiApp = clientEntry(
             <li mix={[itemStyle, secretRowStyle]} key={name}>
               <code>[{name}]</code>
               <span mix={mutedStyle}>{describeSecret(entry)}</span>
-              <button
-                type="button"
-                disabled={busy}
-                mix={[
-                  actionStyle,
-                  dangerStyle,
-                  on("click", () =>
-                    void onRemoveSecret(name)),
-                ]}
-              >
-                削除
-              </button>
+              <span mix={rowButtonsStyle}>
+                {unlocked && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    aria-pressed={editing?.name === name ? "true" : "false"}
+                    mix={[
+                      actionStyle,
+                      on("click", () => onEditSecret(name)),
+                    ]}
+                  >
+                    編集
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  mix={[
+                    actionStyle,
+                    dangerStyle,
+                    on("click", () =>
+                      void onRemoveSecret(name)),
+                  ]}
+                >
+                  削除
+                </button>
+              </span>
             </li>
           ))}
         </ul>
@@ -1231,14 +1311,23 @@ export const KagiApp = clientEntry(
     };
 
     const addSecretCard = () => (
-      <section mix={cardStyle}>
-        <h2>秘密を追加</h2>
+      <section
+        mix={[
+          cardStyle,
+          editing?.kind === "text" ? focusStyle : null,
+          ref((n) => (secretCard = n as HTMLElement)),
+        ]}
+      >
+        <h2>
+          {editing?.kind === "text" ? `${editing.name} を編集` : "秘密を追加"}
+        </h2>
         <div mix={formStyle}>
           <input
             placeholder="名前 (例: GH_SECRET)"
             aria-label="秘密の名前"
             autocomplete="off"
             autocapitalize="characters"
+            readonly={editing?.kind === "text"}
             mix={[
               inputStyle,
               ref((n) => (nameInput = n as HTMLInputElement)),
@@ -1246,7 +1335,9 @@ export const KagiApp = clientEntry(
           />
           <input
             type="password"
-            placeholder="値"
+            placeholder={editing?.kind === "text"
+              ? "新しい値（空なら今の値のまま）"
+              : "値"}
             aria-label="秘密の値"
             autocomplete="off"
             mix={[
@@ -1288,15 +1379,34 @@ export const KagiApp = clientEntry(
             disabled={busy}
             mix={[actionStyle, primaryStyle, on("click", onAddSecret)]}
           >
-            追加して保存
+            {editing?.kind === "text" ? "上書きして保存" : "追加して保存"}
           </button>
+          {editing?.kind === "text" && (
+            <button
+              type="button"
+              disabled={busy}
+              mix={[actionStyle, on("click", onCancelEdit)]}
+            >
+              やめる
+            </button>
+          )}
         </div>
       </section>
     );
 
     const addAppCard = () => (
-      <section mix={cardStyle}>
-        <h2>GitHub App を追加</h2>
+      <section
+        mix={[
+          cardStyle,
+          editing?.kind === "github-app" ? focusStyle : null,
+          ref((n) => (appCard = n as HTMLElement)),
+        ]}
+      >
+        <h2>
+          {editing?.kind === "github-app"
+            ? `${editing.name} を編集`
+            : "GitHub App を追加"}
+        </h2>
         <p mix={mutedStyle}>
           App の秘密鍵はこの端末から出ません。承認のたびに、指定された
           リポジトリと権限だけに絞ったトークンを発行し、リクエスト元に渡す （1
@@ -1308,6 +1418,7 @@ export const KagiApp = clientEntry(
             aria-label="GitHub App の名前"
             autocomplete="off"
             autocapitalize="characters"
+            readonly={editing?.kind === "github-app"}
             mix={[
               inputStyle,
               ref((n) => (appNameInput = n as HTMLInputElement)),
@@ -1334,7 +1445,9 @@ export const KagiApp = clientEntry(
             />
           </label>
           <textarea
-            placeholder="または .pem の中身（-----BEGIN RSA PRIVATE KEY----- から END まで）を貼り付け"
+            placeholder={editing?.kind === "github-app"
+              ? "新しい秘密鍵（空なら今の鍵のまま）"
+              : "または .pem の中身（-----BEGIN RSA PRIVATE KEY----- から END まで）を貼り付け"}
             aria-label="GitHub App の秘密鍵"
             autocomplete="off"
             autocapitalize="none"
@@ -1352,8 +1465,19 @@ export const KagiApp = clientEntry(
             disabled={busy}
             mix={[actionStyle, primaryStyle, on("click", onAddApp)]}
           >
-            GitHub App を保存
+            {editing?.kind === "github-app"
+              ? "上書きして保存"
+              : "GitHub App を保存"}
           </button>
+          {editing?.kind === "github-app" && (
+            <button
+              type="button"
+              disabled={busy}
+              mix={[actionStyle, on("click", onCancelEdit)]}
+            >
+              やめる
+            </button>
+          )}
         </div>
       </section>
     );
@@ -1810,7 +1934,12 @@ const secretRowStyle = css({
   flexDirection: "row",
   flexWrap: "wrap",
   alignItems: "center",
-  "& button": { marginInlineStart: "auto" },
+});
+
+const rowButtonsStyle = css({
+  display: "flex",
+  gap: "0.5rem",
+  marginInlineStart: "auto",
 });
 
 const focusStyle = css({ borderColor: color.accent, borderWidth: "2px" });
@@ -1949,6 +2078,8 @@ const inputStyle = css({
   background: color.bg,
   color: color.fg,
   font: "inherit",
+  // The name of a secret being edited: shown, not changeable.
+  "&[readonly]": { color: color.muted, background: color.card },
 });
 
 const fileLabelStyle = css({

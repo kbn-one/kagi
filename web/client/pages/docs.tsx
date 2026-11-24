@@ -100,6 +100,21 @@ export default function Docs(_handle: Handle) {
           エラーは RFC 9457 の problem（<code>application/problem+json</code>
           ）で、<code>detail</code> に理由が入る。
         </p>
+        <p>
+          結果を kagi のサーバーに平文で通したくないときは、どのリクエストにも
+          {" "}
+          <code>seal</code>{" "}
+          に自分の P-256 公開鍵（raw 65
+          バイト、base64url）を付ける。スマホがその鍵で結果を暗号化し、200 は
+          {" "}
+          <code>response</code> の代わりに{" "}
+          <code>{`{ "sealed_response": { "publicKey", "iv", "data" } }`}</code>
+          {" "}
+          で返る（ECDH → HKDF-SHA-256 → AES-256-GCM。開き方は{" "}
+          <code>tools/git_credential_kagi.ts</code> の{" "}
+          <code>openSealedResult</code>）。git credential helper
+          は常にこれを使う。
+        </p>
         <h3>リクエストの項目</h3>
         <dl mix={tableStyle}>
           <dt>
@@ -380,7 +395,8 @@ git config --global credential.https://github.com.helper \\
           </li>
           <li>
             承認したリクエストの結果は一度だけ受け渡され、スマホのメモリにしか
-            残らない。
+            残らない。<code>seal</code>{" "}
+            を付ければ、サーバーを通るのも暗号文だけになる。
           </li>
           <li>
             止められるのは<strong>あなたの資格情報を使った</strong>操作だけ。

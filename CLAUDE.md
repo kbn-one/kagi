@@ -61,6 +61,11 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
     必須。CLI は
     `tools/git_credential_kagi.ts create owner/name
     --public|--private`。
+- 結果の封（`lib/kagi/result_seal.ts`）: どのリクエストも `seal`（リクエスト元の
+  P-256 公開鍵、raw base64url）を付けられる。付いていればスマホが結果を ECDH →
+  HKDF → AES-GCM（AAD は tx id）で封じ、Room は `sealed_response` で渡す（平文の
+  結果は失敗にする）。git credential helper は常に付け、同じ開き方を自前で持つ
+  （import 無しのため。`git_credential_kagi.test.ts` が突き合わせる）。
 - 通知はこのサーバーが自分で送る（下の「プッシュ通知」）。サインインは無い。
 - CORS 非対応の API は中継（`web/server/lib/kagi/relay.ts`）。vault の
   `relay: true` の秘密を使う `http` リクエストだけ、スマホが端末鍵で

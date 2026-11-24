@@ -20,6 +20,7 @@ import {
 import type {
   ClientMessage,
   KagiResult,
+  SealedResult,
   ServerMessage,
   Transaction,
 } from "./protocol.ts";
@@ -52,7 +53,7 @@ export interface KagiConnection {
   unregister(ms?: number): Promise<void>;
   decide(txId: string, approved: boolean): void;
   /** The call finished: keep its result until asked. */
-  complete(txId: string, result: KagiResult): void;
+  complete(txId: string, result: KagiResult | SealedResult): void;
   fail(txId: string, error: string): void;
   close(): void;
 }
@@ -62,7 +63,7 @@ export function connect(
   onChange: () => void,
 ): KagiConnection {
   const transactions = new Map<string, Transaction>();
-  const results = new Map<string, KagiResult>();
+  const results = new Map<string, KagiResult | SealedResult>();
   let state: ConnectionState = "connecting";
   let applicationServerKey: string | null = null;
   const onlineWaiters = new Set<() => void>();

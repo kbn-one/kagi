@@ -27,8 +27,17 @@ export type KagiRequest =
   | GithubApiRequest
   | GithubCreateRepoRequest;
 
+/**
+ * What every request may carry: the requester's own P-256 public key (raw, base64url), to have the
+ * result sealed for it (`result_seal.ts`), so the server carries only ciphertext. The answer then
+ * comes as `sealed_response` instead of `response`.
+ */
+export interface Sealable {
+  seal?: string;
+}
+
 /** An API call for the approver to make. `[NAME]` in a string is replaced by secret NAME. */
-export interface HttpRequest {
+export interface HttpRequest extends Sealable {
   type?: "http";
   /** The secret names the request uses. Every `[NAME]` placeholder must be listed here. */
   secrets: string[];
@@ -48,7 +57,7 @@ export interface HttpRequest {
  * Both lists must be non-empty: GitHub reads an empty `repositories` as every repository the App is
  * installed on, and empty `permissions` as every permission the App has.
  */
-export interface GithubAppTokenRequest {
+export interface GithubAppTokenRequest extends Sealable {
   type: "github-app-token";
   /** The vault secret holding the App (its ID and private key). */
   app: string;
@@ -64,7 +73,7 @@ export interface GithubAppTokenRequest {
  * `https://api.github.com` + `path` with it, and revokes it. The requester receives the API's
  * answer, never the token: no token to hand back, and no second call to make with it.
  */
-export interface GithubApiRequest {
+export interface GithubApiRequest extends Sealable {
   type: "github-api";
   app: string;
   owner: string;
@@ -86,7 +95,7 @@ export interface GithubApiRequest {
  * The App needs the "Repository creation" (or "Administration") repository permission, and must be
  * installed on `owner`.
  */
-export interface GithubCreateRepoRequest {
+export interface GithubCreateRepoRequest extends Sealable {
   type: "github-create-repo";
   app: string;
   owner: string;
@@ -123,6 +132,20 @@ export interface KagiResult {
   headers: Record<string, string>;
   body: string;
 }
+
+/**
+ * A {@link KagiResult} sealed for the requester's `seal` key (`result_seal.ts`): the phone's
+ * one-off public key, the IV and the ciphertext, all base64url.
+ */
+export interface SealedResult {
+  sealed: { publicKey: string; iv: string; data: string };
+}
+
+export const isSealedResult = (v: unknown): v is SealedResult => {
+  const s = (v as SealedResult | null)?.sealed;
+  return !!s && typeof s === "object" && typeof s.publicKey === "string" &&
+    typeof s.iv === "string" && typeof s.data === "string";
+};
 
 /**
  * - `pending`: waiting for the approver.
@@ -196,7 +219,13 @@ export type ClientMessage =
   /** The call finished. The result itself stays on the phone until a `get`. */
   | { type: "done"; txId: string }
   /** Answer to a `get` (or a failure, any time). */
-  | { type: "result"; txId: string; result?: KagiResult; error?: string }
+  | {
+    type: "result";
+    txId: string;
+    /** Sealed when the request carries `seal`. */
+    result?: KagiResult | SealedResult;
+    error?: string;
+  }
   /**
    * Where to push this approver (`PushSubscription.toJSON()`), replacing what was stored. Pushes
    * stop only with the subscription itself (`unregister`).
@@ -305,6 +334,28 @@ const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
  * approver as needed when it is not.
  */
 export function parseKagiRequest(value: unknown): KagiRequest | string {
+  const req = parseUnsealed(value);
+  if (typeof req === "string") return req;
+  const { seal } = value as Record<string, unknown>;
+  if (seal === undefined) return req;
+  if (typeof seal !== "string" || !isSealKey(seal)) {
+    return "seal must be a P-256 public key: 65 raw bytes (0x04…), base64url";
+  }
+  return { ...req, seal };
+}
+
+/** A raw uncompressed P-256 public key in base64url: 65 bytes starting with 0x04. */
+function isSealKey(text: string): boolean {
+  if (!/^[A-Za-z0-9_-]{87}$/.test(text)) return false;
+  try {
+    const raw = Uint8Array.fromBase64(text, { alphabet: "base64url" });
+    return raw.length === 65 && raw[0] === 4;
+  } catch {
+    return false;
+  }
+}
+
+function parseUnsealed(value: unknown): KagiRequest | string {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return "Body must be a JSON object";
   }

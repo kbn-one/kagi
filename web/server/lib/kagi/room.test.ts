@@ -7,6 +7,7 @@ import {
   relayMessage,
   type ServerMessage,
 } from "../../../client/lib/kagi/protocol.ts";
+import { sealResult } from "../../../client/lib/kagi/result_seal.ts";
 import { createMemoryHub, type KagiHub } from "./hub.ts";
 import type { ApprovalPush, NotifyOutcome } from "./notify.ts";
 import { parseSubPath, PENDING_TTL_MS, type Upgrade } from "./room.ts";
@@ -660,4 +661,58 @@ Deno.test("parseSubPath reads relay", () => {
     subId: SUB,
     action: "relay",
   });
+});
+
+// --- sealed results ---------------------------------------------------------
+
+Deno.test("a sealed result goes through as sealed_response, and an unsealed one fails", async () => {
+  const { hub, connect } = await setup();
+  const phone = await connect();
+  await phone.next(); // ready
+  const pair = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    ["deriveBits"],
+  ) as CryptoKeyPair;
+  const seal = new Uint8Array(
+    await crypto.subtle.exportKey("raw", pair.publicKey),
+  )
+    .toBase64({ alphabet: "base64url", omitPadding: true });
+
+  const finish = async (send: (txId: string) => Promise<void>) => {
+    const { transaction_id: txId } = await (await submit(hub, {
+      ...ghRequest,
+      seal,
+    })).json();
+    await phone.next(); // tx
+    const waiting = result(hub, txId);
+    phone.emit({ type: "decision", txId, approved: true });
+    await phone.next(); // approved
+    await send(txId);
+    return { txId, res: await waiting };
+  };
+
+  const answer = { status: 200, headers: {}, body: "secret answer" };
+  const sealed = await finish(async (txId) =>
+    phone.emit({
+      type: "result",
+      txId,
+      result: await sealResult(answer, seal, txId),
+    })
+  );
+  const body = await sealed.res.json();
+  assertEquals(body.status, "delivered");
+  assertEquals(body.response, undefined);
+  assertEquals(typeof body.sealed_response.data, "string");
+  assert(!JSON.stringify(body).includes("secret answer"));
+  await phone.next(); // delivered
+
+  // The phone answers in the clear: the requester asked for sealed, so it is a failure.
+  const clear = await finish((txId) =>
+    Promise.resolve(phone.emit({ type: "result", txId, result: answer }))
+  );
+  assertEquals(clear.res.status, 502);
+  const problem = await clear.res.json();
+  assertEquals(problem.transaction_status, "failed");
+  assert(!JSON.stringify(problem).includes("secret answer"));
 });

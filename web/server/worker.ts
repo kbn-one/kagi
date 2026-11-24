@@ -28,6 +28,7 @@ import {
 import { rateLimited, type RateLimiters } from "./lib/kagi/rate_limit.ts";
 import { copDenied, problem } from "./lib/problem.ts";
 import { type AssetsLike, createPagesRouter } from "./pages.ts";
+import { withSecurityHeaders } from "./security_headers.ts";
 
 /** The Durable Object class behind `KAGI_ROOM`; `cloudflare.config.ts` declares it. */
 export { KagiRoom } from "./lib/kagi/durable_object.ts";
@@ -62,25 +63,30 @@ let pages: ReturnType<typeof createPagesRouter> | undefined;
 let pagesAssets: AssetsLike | undefined;
 
 export default {
-  fetch(request: Request, env?: WorkerEnv) {
-    // Without the binding (the Deno tests) rooms stay in memory.
-    if (!boundDurableObjects && env?.KAGI_ROOM) {
-      useDurableObjects(env.KAGI_ROOM);
-      boundDurableObjects = true;
-    }
-    // Without it (the Deno tests, unless they set one) the relay answers 501.
-    if (env?.LOADER && boundLoader !== env.LOADER) {
-      setRelayRunner(loaderRunner(env.LOADER));
-      boundLoader = env.LOADER;
-    }
-    if (new URL(request.url).pathname.startsWith("/api/")) {
-      return api(request, env ?? {});
-    }
-    // Everything else that reaches the Worker is a page (`runWorkerFirst`): see `pages.ts`.
-    if (!pages || pagesAssets !== env?.ASSETS) {
-      pages = createPagesRouter(env?.ASSETS);
-      pagesAssets = env?.ASSETS;
-    }
-    return pages.fetch(request);
+  async fetch(request: Request, env?: WorkerEnv): Promise<Response> {
+    return withSecurityHeaders(await answer(request, env));
   },
 };
+
+/** The response before the security headers (`security_headers.ts`). */
+function answer(request: Request, env?: WorkerEnv): Promise<Response> {
+  // Without the binding (the Deno tests) rooms stay in memory.
+  if (!boundDurableObjects && env?.KAGI_ROOM) {
+    useDurableObjects(env.KAGI_ROOM);
+    boundDurableObjects = true;
+  }
+  // Without it (the Deno tests, unless they set one) the relay answers 501.
+  if (env?.LOADER && boundLoader !== env.LOADER) {
+    setRelayRunner(loaderRunner(env.LOADER));
+    boundLoader = env.LOADER;
+  }
+  if (new URL(request.url).pathname.startsWith("/api/")) {
+    return api(request, env ?? {});
+  }
+  // Everything else that reaches the Worker is a page (`runWorkerFirst`): see `pages.ts`.
+  if (!pages || pagesAssets !== env?.ASSETS) {
+    pages = createPagesRouter(env?.ASSETS);
+    pagesAssets = env?.ASSETS;
+  }
+  return pages.fetch(request);
+}

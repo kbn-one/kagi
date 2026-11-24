@@ -10,6 +10,7 @@ import {
   removeFromHistory,
   selectRange,
   shownStatus,
+  withResultStatus,
   writeDeleted,
   writeHistory,
 } from "../../../client/lib/kagi/history.ts";
@@ -136,4 +137,25 @@ Deno.test("a swipe selects the rows between its start and the finger, worked out
   assertEquals([...selectRange(all, ids, 0, 2, false)].sort(), ["d", "e"]);
   // Out of range clamps.
   assertEquals(selectRange(new Set(), ids, -3, 99, true).size, 5);
+});
+
+Deno.test("a result's status is kept on this phone's entry, and survives the server's copy", () => {
+  const sent: Transaction = {
+    id: "a",
+    request: { secrets: [], url: "https://api.example.com/x" },
+    status: "done",
+    createdAt: 1,
+  };
+  let history = mergeHistory([], [sent]);
+  history = withResultStatus(history, "a", 404);
+  assertEquals(history[0].resultStatus, 404);
+
+  // The server sends the transaction again, delivered now, and without the status.
+  const merged = mergeHistory(history, [{ ...sent, status: "delivered" }]);
+  assertEquals(merged[0].status, "delivered");
+  assertEquals(merged[0].resultStatus, 404);
+
+  // An entry this phone never answered has none.
+  const other = mergeHistory(merged, [{ ...sent, id: "b", createdAt: 2 }]);
+  assertEquals(other.find((t) => t.id === "b")?.resultStatus, undefined);
 });

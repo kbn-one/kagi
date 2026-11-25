@@ -1422,22 +1422,38 @@ export const KagiApp = clientEntry(
             aria-label="秘密の名前"
             autocomplete="off"
             autocapitalize="characters"
+            {...NOT_A_LOGIN}
             readonly={editing?.kind === "text"}
             mix={[
               inputStyle,
               ref((n) => (nameInput = n as HTMLInputElement)),
             ]}
           />
+          {
+            /*
+             * Not `type="password"`: next to the name field that made a "login form" to password
+             * managers, which then offered to fill the name. Masked with CSS instead, and turned
+             * back into a password field where the browser cannot mask a text field.
+             */
+          }
           <input
-            type="password"
+            type="text"
             placeholder={editing?.kind === "text"
               ? "新しい値（空なら今の値のまま）"
               : "値"}
             aria-label="秘密の値"
             autocomplete="off"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck={false}
+            {...NOT_A_LOGIN}
             mix={[
               inputStyle,
-              ref((n) => (valueInput = n as HTMLInputElement)),
+              maskedStyle,
+              ref((n) => {
+                valueInput = n as HTMLInputElement;
+                if (!canMaskText()) valueInput.type = "password";
+              }),
             ]}
           />
           <input
@@ -1445,6 +1461,7 @@ export const KagiApp = clientEntry(
             aria-label="送信を許すホスト"
             autocomplete="off"
             autocapitalize="none"
+            {...NOT_A_LOGIN}
             mix={[
               inputStyle,
               ref((n) => (hostsInput = n as HTMLInputElement)),
@@ -1513,6 +1530,7 @@ export const KagiApp = clientEntry(
             aria-label="GitHub App の名前"
             autocomplete="off"
             autocapitalize="characters"
+            {...NOT_A_LOGIN}
             readonly={editing?.kind === "github-app"}
             mix={[
               inputStyle,
@@ -1524,6 +1542,7 @@ export const KagiApp = clientEntry(
             aria-label="GitHub App ID"
             autocomplete="off"
             autocapitalize="none"
+            {...NOT_A_LOGIN}
             mix={[
               inputStyle,
               ref((n) => (appIdInput = n as HTMLInputElement)),
@@ -2238,6 +2257,27 @@ const checkboxRowStyle = css({
   gap: "0.5rem",
   "& input": { marginTop: "0.25rem" },
 });
+
+/**
+ * Tells the password managers that read a marker (1Password, LastPass, Bitwarden, Dashlane) that a
+ * vault field is not part of a login. Safari's and Chrome's own read none; for them, the vault form
+ * has no password field to make it look like one.
+ */
+const NOT_A_LOGIN = {
+  "data-1p-ignore": "true",
+  "data-lpignore": "true",
+  "data-bwignore": "true",
+  "data-form-type": "other",
+} as const;
+
+/** Whether this browser can mask a text field's characters (`-webkit-text-security`). */
+const canMaskText = () =>
+  typeof CSS === "undefined" || CSS.supports("-webkit-text-security", "disc");
+
+/** A text field that shows dots, as a password field would, without being one. */
+const maskedStyle = css(
+  { WebkitTextSecurity: "disc" } as Record<string, string>,
+);
 
 const inputStyle = css({
   padding: "0.55rem 0.7rem",

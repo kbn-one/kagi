@@ -49,6 +49,13 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
   パス。狭い画面では折り返す）。削除は削除モードで、行を横にスワイプして
   上下になぞると範囲選択（行は `touch-action: pan-y`）。削除した id はサーバーが
   忘れるまで覚えておき、送り直されても戻さない。
+- 「完了 (受け取り待ち)」（`done`:
+  結果はスマホのメモリにだけある）は、承認タブの 「取り消す」で認証済み
+  WebSocket から `{ type: "cancel", txId }` を送って
+  取り下げられる。スマホはメモリの結果を捨て、Room は `cancelled` にして待ち手と
+  以後の `GET /res` に 410 を返す（遅れて来た結果も渡さない）。取り消したものは
+  履歴に移り、そこで削除できる。取り消さなくても 1 時間で DO の alarm が消し、
+  スマホの履歴も `shownStatus` で期限切れとして扱う。
 - リクエストは 4 種類（`protocol.ts` の `KagiRequest`）。
   - `http`（既定）: `[NAME]` を埋めて API を呼ぶ。
   - `github-app-token`: GitHub App の installation token を指定リポジトリ・指定

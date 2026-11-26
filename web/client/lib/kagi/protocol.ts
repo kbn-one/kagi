@@ -152,6 +152,7 @@ export const isSealedResult = (v: unknown): v is SealedResult => {
  * - `approved`: the approver said yes and the call is in flight.
  * - `done`: the call finished; the result is held on the phone until the requester asks.
  * - `delivered`: the requester has the result. It is not kept anywhere any more.
+ * - `cancelled`: the approver withdrew a result nobody collected (`cancel`); the phone dropped it.
  * - `rejected` / `failed` / `expired`: final, with no result.
  */
 export type TxStatus =
@@ -159,6 +160,7 @@ export type TxStatus =
   | "approved"
   | "done"
   | "delivered"
+  | "cancelled"
   | "rejected"
   | "failed"
   | "expired";
@@ -170,6 +172,7 @@ export const TX_RETENTION_MS = 60 * 60_000;
 
 export const FINAL_STATUSES: readonly TxStatus[] = [
   "delivered",
+  "cancelled",
   "rejected",
   "failed",
   "expired",
@@ -218,6 +221,11 @@ export type ClientMessage =
   | { type: "decision"; txId: string; approved: boolean }
   /** The call finished. The result itself stays on the phone until a `get`. */
   | { type: "done"; txId: string }
+  /**
+   * Withdraws a `done` result nobody has collected: the transaction becomes `cancelled`, anyone
+   * waiting on it is answered 410, and the phone drops the result it held.
+   */
+  | { type: "cancel"; txId: string }
   /** Answer to a `get` (or a failure, any time). */
   | {
     type: "result";

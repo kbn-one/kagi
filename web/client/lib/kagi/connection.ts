@@ -17,12 +17,13 @@ import {
   unsubscribePush,
 } from "@remix-kbn/web-push/client";
 
-import type {
-  ClientMessage,
-  KagiResult,
-  SealedResult,
-  ServerMessage,
-  Transaction,
+import {
+  type ClientMessage,
+  FINAL_STATUSES,
+  type KagiResult,
+  type SealedResult,
+  type ServerMessage,
+  type Transaction,
 } from "./protocol.ts";
 import { signChallenge } from "./device.ts";
 import { routes } from "../../routes.ts";
@@ -55,6 +56,11 @@ export interface KagiConnection {
   /** The call finished: keep its result until asked. */
   complete(txId: string, result: KagiResult | SealedResult): void;
   fail(txId: string, error: string): void;
+  /**
+   * Withdraws a result nobody has collected (`done`): the result is dropped from memory now, and
+   * the server marks the transaction `cancelled` and answers anyone waiting with 410.
+   */
+  cancel(txId: string): void;
   close(): void;
 }
 
@@ -137,6 +143,10 @@ export function connect(
             return;
           case "tx":
             transactions.set(m.transaction.id, m.transaction);
+            // Finished (delivered, withdrawn, failed…): nobody can ask for the result any more.
+            if (FINAL_STATUSES.includes(m.transaction.status)) {
+              results.delete(m.transaction.id);
+            }
             break;
           case "get":
             answer(m.txId);
@@ -243,6 +253,10 @@ export function connect(
       send({ type: "done", txId });
     },
     fail: (txId, error) => send({ type: "result", txId, error }),
+    cancel(txId) {
+      results.delete(txId);
+      send({ type: "cancel", txId });
+    },
     close() {
       closed = true;
       clearTimeout(timer);

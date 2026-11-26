@@ -262,6 +262,86 @@ Deno.test("a phone that reconnects is asked for results a requester is waiting o
   assertEquals((await waiting).status, 200);
 });
 
+Deno.test("the approver withdraws a result nobody collected: waiters and later asks get 410", async () => {
+  const { hub, connect } = await setup();
+  const phone = await connect();
+  await phone.next(); // ready
+  const { transaction_id: txId } = await (await submit(hub, ghRequest)).json();
+  await phone.next(); // tx
+  phone.emit({ type: "decision", txId, approved: true });
+  phone.emit({ type: "done", txId });
+  await phone.next(); // approved
+  await phone.next(); // done
+
+  // A requester waits, the phone is asked, and the approver withdraws instead of answering.
+  const waiting = result(hub, txId);
+  assertEquals(await phone.next(), { type: "get", txId });
+  phone.emit({ type: "cancel", txId });
+  const withdrawn = await phone.next();
+  assert(withdrawn.type === "tx");
+  assertEquals(withdrawn.transaction.status, "cancelled");
+
+  const got = await waiting;
+  assertEquals(got.status, 410);
+  assertEquals(got.headers.get("content-type"), "application/problem+json");
+  assertEquals((await got.json()).transaction_status, "cancelled");
+
+  // A result sent late is not delivered.
+  phone.emit({
+    type: "result",
+    txId,
+    result: { status: 200, headers: {}, body: "token" },
+  });
+  await new Promise((r) => setTimeout(r, 10));
+  const again = await result(hub, txId, 0);
+  assertEquals(again.status, 410);
+  assertEquals((await again.json()).transaction_status, "cancelled");
+
+  // The phone's history hears of it on reconnect.
+  phone.close();
+  const second = await connect();
+  const ready = await second.next();
+  assert(ready.type === "ready");
+  assertEquals(ready.transactions.map((t) => t.status), ["cancelled"]);
+});
+
+Deno.test("cancel only withdraws a done result, and only from the authenticated phone", async () => {
+  const { hub, connect } = await setup();
+  const phone = await connect();
+  await phone.next(); // ready
+  const { transaction_id: txId } = await (await submit(hub, ghRequest)).json();
+  await phone.next(); // tx
+
+  // Pending: cancel is not a rejection; nothing changes.
+  phone.emit({ type: "cancel", txId });
+  await new Promise((r) => setTimeout(r, 10));
+  assertEquals(
+    await (await result(hub, txId, 0)).json(),
+    { transaction_id: txId, status: "pending" },
+  );
+
+  phone.emit({ type: "decision", txId, approved: true });
+  phone.emit({ type: "done", txId });
+  await phone.next(); // approved
+  await phone.next(); // done
+
+  // A socket that has not authenticated is closed, and the result stays.
+  const other = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign", "verify"],
+  );
+  const intruder = await connect(other.privateKey);
+  assertEquals((await intruder.next()).type, "error");
+  intruder.emit({ type: "cancel", txId });
+  await new Promise((r) => setTimeout(r, 10));
+  assertEquals(intruder.closed, 4401);
+  assertEquals(
+    await (await result(hub, txId, 0)).json(),
+    { transaction_id: txId, status: "done" },
+  );
+});
+
 Deno.test("rejection and failure are final problems", async () => {
   const { hub, connect } = await setup();
   const phone = await connect();

@@ -603,6 +603,16 @@ export class Room {
         }
         return;
       }
+      case "cancel": {
+        // Only a result waiting to be collected: a request still waiting is rejected instead, and
+        // one in flight finishes (or fails) on its own.
+        if (tx.status !== "done") return;
+        tx.status = "cancelled";
+        await this.#save(tx);
+        this.#broadcast({ type: "tx", transaction: tx });
+        this.#settle(tx.id, { kind: "final", tx });
+        return;
+      }
       case "result": {
         if (msg.error !== undefined || !msg.result) {
           if (tx.status !== "approved" && tx.status !== "done") return;
@@ -775,6 +785,12 @@ function finalResponse(tx: Transaction): Response {
       return problem({
         status: 410,
         detail: "Nobody approved the request in time",
+        ...base,
+      });
+    case "cancelled":
+      return problem({
+        status: 410,
+        detail: "The approver withdrew the result before it was collected",
         ...base,
       });
     default:

@@ -107,8 +107,11 @@ Remix v3 + Deno。ページは静的ビルドを Cloudflare Workers の static a
 - `web/client/` — ブラウザに渡るもの全て (routes / pages / islands / layout /
   static / lib)。`deno.ns` 無しで型チェックされる。`Deno.` を参照しない。
   - ページは `/`（仕組みの概要と、ホーム画面への追加を促す
-    `islands/setup_cta.tsx`）、 `/kagi`（承認者の画面。manifest の
-    `start_url`）、`/docs`（使い方）。
+    `islands/setup_cta.tsx`。ホーム画面のアイコンから `/` に来たら `<head>` の
+    inline script（`lib/kagi/launch.ts`、ページの `standaloneStart`）が `/kagi`
+    へ `location.replace` する。`start_url` を無視する環境への保険で、承認画面
+    からの「kagi について」は `/?about` で抜ける）、
+    `/kagi`（承認者の画面。manifest の `start_url`）、`/docs`（使い方）。
   - スマホで使う前提。`/kagi` は準備が済むまで 1 画面 1 ステップで進む:
     ホーム画面 に追加 → 通知を有効にする（同時に承認者として登録）→
     パスキーを作る。判定は `lib/kagi/setup.ts`（端末の判定は

@@ -117,11 +117,15 @@ Deno.test("the web app manifest starts the home-screen app at /kagi, with PNG ic
   const res = await router.fetch(new Request("http://x/manifest.webmanifest"));
   assertStringIncludes(res.headers.get("content-type") ?? "", "manifest+json");
   const manifest = await res.json() as {
+    id: string;
     start_url: string;
+    scope: string;
     display: string;
     icons: { src: string; sizes: string }[];
   };
   assertEquals(manifest.start_url, "/kagi");
+  assertEquals(manifest.id, "/kagi");
+  assertEquals(manifest.scope, "/");
   assertEquals(manifest.display, "standalone");
   for (const icon of manifest.icons) {
     const png = await router.fetch(new Request(`http://x${icon.src}`));
@@ -139,4 +143,22 @@ Deno.test("the web app manifest starts the home-screen app at /kagi, with PNG ic
     html,
     'name="apple-mobile-web-app-status-bar-style" content="default"',
   );
+});
+
+Deno.test("a home-screen launch onto the top page goes to /kagi before anything is drawn", async () => {
+  const home = await (await router.fetch(new Request("http://x/"))).text();
+  const head = home.slice(0, home.indexOf("</head>"));
+  // First in <head>, with the page's nonce, so the CSP lets it run.
+  const script = head.match(/<script nonce="[^"]+">([^<]*)<\/script>/)?.[1];
+  assert(script, "inline script in <head>");
+  assert(head.indexOf(script) < head.indexOf('<meta name="viewport"'));
+  assertStringIncludes(script, "(display-mode: ");
+  assertStringIncludes(script, "navigator.standalone===true");
+  assertStringIncludes(script, 'location.replace("/kagi")');
+
+  for (const path of ["/kagi", "/docs"]) {
+    const html = await (await router.fetch(new Request(`http://x${path}`)))
+      .text();
+    assert(!html.includes("display-mode"), path);
+  }
 });

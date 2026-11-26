@@ -37,6 +37,7 @@
 
 import { css, type Handle, type RemixNode } from "@remix-run/component";
 
+import { standaloneRedirectScript } from "./lib/kagi/launch.ts";
 import { routes } from "./routes.ts";
 import { color, contentWidth } from "./tokens.ts";
 
@@ -79,6 +80,11 @@ export interface LayoutProps {
    * navigation — `/kagi`, whose tab bar replaces the site's links.
    */
   frame?: Frame;
+  /**
+   * Where a launch from the home-screen icon that lands on this page goes instead
+   * (`lib/kagi/launch.ts`). Set on the top page only; a normal browser tab is not affected.
+   */
+  standaloneStart?: string;
   children: RemixNode;
 }
 
@@ -114,6 +120,8 @@ export interface PageModule<Props = Record<string, never>> {
   hydrate: boolean;
   /** The frame around the page (see {@link LayoutProps.frame}). Defaults to `"site"`. */
   frame?: Frame;
+  /** See {@link LayoutProps.standaloneStart}. */
+  standaloneStart?: string;
 }
 
 /**
@@ -130,6 +138,13 @@ export function Layout(handle: Handle<LayoutProps>) {
       <html lang="ja">
         <head>
           <meta charset="utf-8" />
+          {props.standaloneStart
+            ? (
+              <script nonce={props.nonce}>
+                {standaloneRedirectScript(props.standaloneStart)}
+              </script>
+            )
+            : null}
           <meta
             name="viewport"
             content="width=device-width, initial-scale=1, viewport-fit=cover"

@@ -135,6 +135,7 @@ const STATUS_LABEL: Record<TxStatus, string> = {
   approved: "実行中",
   done: "完了 (受け取り待ち)",
   delivered: "受け渡し済み",
+  cancelled: "取り消し",
   rejected: "拒否",
   failed: "失敗",
   expired: "期限切れ",
@@ -603,6 +604,21 @@ export const KagiApp = clientEntry(
 
     const onReject = (tx: Transaction) => {
       connection?.decide(tx.id, false);
+    };
+
+    /**
+     * Withdraws a result the requester never collected (受け取り待ち). The result held in this
+     * tab's memory is dropped at once; the server marks it 取り消し, and it moves to the history.
+     */
+    const onCancel = (tx: Transaction) => {
+      const conn = connection;
+      if (!conn || conn.state !== "online") return;
+      if (
+        !confirm(
+          "この結果を取り消しますか？リクエスト元はもう受け取れなくなります（この端末に残っている結果も消します）。",
+        )
+      ) return;
+      conn.cancel(tx.id);
     };
 
     const onApprove = (tx: Transaction) =>
@@ -1164,6 +1180,21 @@ export const KagiApp = clientEntry(
                 ]}
               >
                 拒否
+              </button>
+            </div>
+          )}
+          {status === "done" && (
+            <div mix={rowStyle}>
+              <button
+                type="button"
+                disabled={connection?.state !== "online"}
+                mix={[
+                  actionStyle,
+                  dangerStyle,
+                  on("click", () => onCancel(tx)),
+                ]}
+              >
+                取り消す
               </button>
             </div>
           )}

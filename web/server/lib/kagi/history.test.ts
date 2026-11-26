@@ -108,6 +108,8 @@ Deno.test("an entry the server can no longer update is shown as it must have end
   );
   assertEquals(isPast(tx("a", now, "delivered"), now), true);
   assertEquals(isPast(tx("a", now, "done"), now), false);
+  // A withdrawn result moves to the history, where it can be deleted.
+  assertEquals(isPast(tx("a", now, "cancelled"), now), true);
 });
 
 Deno.test("formatTime is yyyy-mm-dd HH:mm in local time", () => {

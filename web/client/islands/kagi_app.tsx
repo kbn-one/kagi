@@ -82,6 +82,7 @@ import {
   createRepository,
   mintInstallationToken,
 } from "../lib/kagi/github_app.ts";
+import { aboutHref } from "../lib/kagi/launch.ts";
 import {
   type GithubApiRequest,
   type GithubAppTokenRequest,
@@ -1764,7 +1765,7 @@ export const KagiApp = clientEntry(
         </section>
         <p mix={[mutedStyle, linksStyle]}>
           <a href={routes.docs.href()}>使い方</a>
-          <a href={routes.home.href()}>kagi について</a>
+          <a href={aboutHref(routes.home.href())}>kagi について</a>
         </p>
       </>
     );
@@ -1789,7 +1790,7 @@ export const KagiApp = clientEntry(
           {step === "vault" && vaultStep()}
           {step && (
             <p mix={[mutedStyle, linksStyle]}>
-              <a href={routes.home.href()}>kagi について</a>
+              <a href={aboutHref(routes.home.href())}>kagi について</a>
               <a href={routes.docs.href()}>使い方</a>
             </p>
           )}

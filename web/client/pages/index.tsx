@@ -13,6 +13,9 @@ export const description =
 /** The call to action reads the device, so the page boots the runtime. */
 export const hydrate = true;
 
+/** Launched from the home-screen icon, the app opens on the approver's screen, not here. */
+export const standaloneStart = routes.kagi.href();
+
 export default function Home(_handle: Handle) {
   return () => (
     <>
